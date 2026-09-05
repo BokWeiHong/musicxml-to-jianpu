@@ -3,7 +3,7 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = r"D:\jianpu\assets\app.ico"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app.ico")
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 BG_TOP = (79, 70, 229)      # #4F46E5 indigo
 BG_BOTTOM = (30, 41, 59)    # #1E293B dark slate

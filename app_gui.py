@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -65,6 +66,49 @@ def find_lilypond():
         except OSError:
             pass
     return None
+
+
+def _freshen_lilypond_ccache(lilypond_exe):
+    """Make LilyPond's precompiled Guile/LilyPond caches usable again.
+
+    Portable / bundled LilyPond trees (like the ``lilypond-2.26.0`` folder
+    shipped next to this app) frequently end up with compiled ``.go`` cache
+    files whose timestamps are OLDER than their ``.scm`` sources.  That
+    happens because git checkouts, zip extraction and installers do not
+    preserve the original file timestamps.
+
+    When that happens, Guile (LilyPond's Scheme interpreter) believes it must
+    byte-recompile its own core modules (``ice-9/eval.scm``, ...) on the next
+    run.  The recompilation takes minutes and commonly aborts with::
+
+        ERROR: In procedure apply-smob/1:
+        Wrong number of arguments to #<boot-closure ... (_ . _)>
+
+    which surfaces to the user as "Failed to generate Jianpu".  Touching the
+    shipped ``.go`` files so they are newer than every source file makes Guile
+    trust the precompiled bytecode and start normally (a few hundred file
+    mtimes, done once per conversion, well under a tenth of a second).
+
+    Only touches files under ``<lilypond-root>/lib`` (the Guile ccache and the
+    LilyPond ccache live there in every supported layout).  Runs are cheap and
+    idempotent; permission errors (e.g. a read-only system install) are
+    ignored -- system installs normally ship consistent timestamps anyway.
+    """
+    root = os.path.dirname(os.path.dirname(lilypond_exe))  # folder with bin/
+    lib_dir = os.path.join(root, "lib")
+    if not os.path.isdir(lib_dir):
+        return 0
+    now = time.time()
+    touched = 0
+    for dirpath, _dirnames, filenames in os.walk(lib_dir):
+        for name in filenames:
+            if name.endswith(".go"):
+                try:
+                    os.utime(os.path.join(dirpath, name), (now, now))
+                    touched += 1
+                except OSError:
+                    pass
+    return touched
 
 
 # Note types jianpu_ly cannot typeset. After the 128th patch below, the
@@ -378,6 +422,14 @@ def convert_musicxml_to_jianpu(xml_path):
             f.write(ly_source)
 
         # 2. lilypond: Jianpu LilyPond source -> PDF
+        #    Bundled/portable LilyPond trees can carry ccache .go files older
+        #    than their .scm sources (git checkouts / zips / installers do not
+        #    preserve timestamps); Guile then tries to byte-recompile its own
+        #    core modules and dies with "Wrong number of arguments to
+        #    #<boot-closure ...>".  Freshen the cache so compilation starts
+        #    immediately with the shipped bytecode.
+        _freshen_lilypond_ccache(lilypond_exe)
+
         proc = subprocess.run(
             [lilypond_exe, "-o", temp_pdf_base, temp_ly],
             stdout=subprocess.PIPE,

@@ -137,6 +137,296 @@ def _normalize_musicxml(xml_text):
                   xml_text)
 
 
+_JIANPU_DYNAMIC_FONT_SIZE = -3
+
+
+def _inject_dynamic_font_size(ly_source):
+    """Insert a font-size override for DynamicText into every voice."""
+    size = _JIANPU_DYNAMIC_FONT_SIZE
+    if size is None:
+        return ly_source
+    voice_open = re.compile(r'\\new Voice\s*=\s*"[^"]*"\s*\{')
+    if not voice_open.search(ly_source):
+        return ly_source  # unexpected layout: leave the file untouched
+    return voice_open.sub(
+        lambda m: m.group(0) + "\n\\override DynamicText.font-size = #%s" % size,
+        ly_source)
+
+
+# ---------------------------------------------------------------------------
+# MusicXML metadata extraction
+#
+# jianpu_ly fills \header fields from the MusicXML itself, but it picks the
+# wrong values for display (e.g. it prefers <instrument-name> "Guzheng" over
+# the part name 古筝1, and it drops the 编配人 arranger credit).  We parse the
+# metadata ourselves so the rendered header shows exactly what we want:
+# title centered, instrument on the left, composer/arranger on the right.
+# ---------------------------------------------------------------------------
+
+def _tag_local(tag):
+    """ElementTree tag -> local name (strips any '{namespace}' prefix)."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _iter_text(elem):
+    """Full text of an element including any nested markup tags."""
+    return "".join(elem.itertext()).strip() if elem is not None else ""
+
+
+def _find_child(parent, name):
+    """First direct child with the given local name, namespace-agnostic."""
+    if parent is None:
+        return None
+    for child in parent:
+        if _tag_local(child.tag) == name:
+            return child
+    return None
+
+
+def _find_children(parent, name):
+    """All direct children with the given local name, namespace-agnostic."""
+    if parent is None:
+        return []
+    return [child for child in parent if _tag_local(child.tag) == name]
+
+
+def _strip_label(value, *prefixes):
+    """Remove redundant prefix labels (e.g. '作曲人：') from a credit text."""
+    for prefix in prefixes:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+    return value
+
+
+def extract_musicxml_metadata(xml_path):
+    """Return display metadata parsed from a MusicXML file (.musicxml/.xml).
+
+    Returns a dict with keys: title, composer, arranger, instrument,
+    instrument_type.  Any field that cannot be found is an empty string.
+    Handles the default MusicXML namespace, UTF-8/UTF-16 files and BOMs, for
+    both partwise and timewise roots.
+    """
+    raw = open(xml_path, "rb").read()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        data = raw.decode("utf-8-sig")
+    elif raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        data = raw.decode("utf-16")
+    else:
+        try:
+            data = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            data = raw.decode("latin-1")
+
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(data)
+    credits = _find_children(root, "credit")
+
+    # --- title ----------------------------------------------------------
+    title = ""
+    for credit in credits:
+        ctype = _find_child(credit, "credit-type")
+        if ctype is not None and (ctype.text or "").strip() == "title":
+            words = _find_children(credit, "credit-words")
+            if words:
+                title = _iter_text(words[0])
+            break
+
+    # --- composer / arranger -------------------------------------------
+    # MuseScore exports one composer <credit> whose <credit-words> entries
+    # are 作曲人：... then (optionally) 编配人：...
+    composer = arranger = ""
+    for credit in credits:
+        ctype = _find_child(credit, "credit-type")
+        ctext = (ctype.text or "").strip() if ctype is not None else ""
+        if ctext == "composer":
+            words = _find_children(credit, "credit-words")
+            if words:
+                composer = _iter_text(words[0])
+            if len(words) >= 2:
+                arranger = _iter_text(words[1])
+            break
+
+    # Some exporters put the arranger in its own credit element
+    if not arranger:
+        for credit in credits:
+            ctype = _find_child(credit, "credit-type")
+            ctext = (ctype.text or "").strip() if ctype is not None else ""
+            if ctext == "arranger":
+                words = _find_children(credit, "credit-words")
+                if words:
+                    arranger = _iter_text(words[0])
+                break
+
+    # --- part / instrument name ----------------------------------------
+    instrument = ""
+    instrument_type = ""
+    part_list = _find_child(root, "part-list")
+    score_part = _find_child(part_list, "score-part")
+    if score_part is not None:
+        part_name = _find_child(score_part, "part-name")
+        if part_name is not None:
+            instrument = _iter_text(part_name)
+        for score_instrument in _find_children(score_part, "score-instrument"):
+            nm = _find_child(score_instrument, "instrument-name")
+            if nm is not None:
+                instrument_type = _iter_text(nm)
+                break
+
+    # Older files put the part name into an untagged <credit> instead
+    if not instrument:
+        for credit in credits:
+            if _find_child(credit, "credit-type") is None:
+                words = _find_children(credit, "credit-words")
+                if words:
+                    instrument = _iter_text(words[0])
+                break
+
+    # Drop redundant 作曲人：/ 编配人： prefixes; the header layout already
+    # communicates which field is which.
+    composer = _strip_label(composer, "作曲人：", "作曲人:")
+    arranger = _strip_label(arranger, "编配人：", "编配人:")
+
+    return {
+        "title": title,
+        "composer": composer,
+        "arranger": arranger,
+        "instrument": instrument,
+        "instrument_type": instrument_type,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Header layout on the generated .ly file
+#
+# jianpu_ly prints every \score header centred (LilyPond's default).  We want:
+#     title                 -> centre
+#     instrument            -> left
+#     composer / arranger   -> right
+# so we rewrite the per-score \header{...} fields and set a custom
+# scoreTitleMarkup inside the file-level \paper block.
+# ---------------------------------------------------------------------------
+
+def _lp_escape(text):
+    """Escape a string for use inside a LilyPond double-quoted string."""
+    return (text.replace("\\", "\\\\").replace('"', '\\"')
+                .replace("\r", " ").replace("\n", " "))
+
+
+def _build_ly_header(meta):
+    """Return a LilyPond \\header{...} block for the given metadata dict.
+
+    Composer and arranger get their 作曲人：/ 编配人： labels here so they are
+    always shown in the PDF even if the MusicXML credits omit the label.
+    """
+    fields = []
+    for key in ("title", "composer", "arranger", "instrument"):
+        value = (meta.get(key) or "").strip()
+        if not value:
+            continue
+        if key == "composer":
+            value = "作曲人：" + value
+        elif key == "arranger":
+            value = "编配人：" + value
+        fields.append('%s="%s"' % (key, _lp_escape(value)))
+    return "\\header{\n" + "\n".join(fields) + "\n}"
+
+
+def _replace_header_blocks(ly_source, meta):
+    """Replace every *active* \\header{...} block with our own header.
+
+    Commented examples (e.g. jianpu_ly's ``% \\header { tagline="" }``) are
+    skipped so we never uncomment code by accident.
+    """
+    header = _build_ly_header(meta)
+    result = []
+    pos = 0
+    while True:
+        start = ly_source.find("\\header", pos)
+        if start < 0:
+            result.append(ly_source[pos:])
+            break
+        brace = ly_source.find("{", start)
+        if brace < 0:
+            result.append(ly_source[pos:])
+            break
+        # find the matching closing brace
+        depth = 0
+        end = brace
+        while end < len(ly_source):
+            if ly_source[end] == "{":
+                depth += 1
+            elif ly_source[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    end += 1
+                    break
+            end += 1
+        # skip \header tokens that sit on a comment line (starts with %)
+        line_start = ly_source.rfind("\n", 0, start) + 1
+        prefix = ly_source[line_start:start]
+        if prefix.strip().startswith("%"):
+            pos = end
+            continue
+        result.append(ly_source[pos:start])
+        result.append(header)
+        pos = end
+    return "".join(result)
+
+
+def _build_score_title_markup(meta):
+    """Compose the scoreTitleMarkup for our desired title layout."""
+    title = (meta.get("title") or "").strip()
+    composer = (meta.get("composer") or "").strip()
+    arranger = (meta.get("arranger") or "").strip()
+    instrument = (meta.get("instrument") or "").strip()
+
+    rows = []
+    if title:
+        rows.append("    \\fill-line { \\larger \\bold \\fromproperty #'header:title }")
+
+    left = "\\fromproperty #'header:instrument" if instrument else ""
+    right = []
+    if composer:
+        right.append("\\fromproperty #'header:composer")
+    if arranger:
+        right.append("\\fromproperty #'header:arranger")
+
+    if left and right:
+        if len(right) == 1:
+            rows.append("    \\fill-line { %s %s }" % (left, right[0]))
+        else:
+            rows.append("    \\fill-line { %s \\right-column { %s } }"
+                        % (left, " ".join(right)))
+    elif left:
+        # instrument alone -> keep it on the left
+        rows.append("    \\fill-line { %s \\null }" % left)
+    elif right:
+        # composer/arranger alone -> keep them on the right
+        if len(right) == 1:
+            rows.append("    \\fill-line { \\null %s }" % right[0])
+        else:
+            rows.append("    \\fill-line { \\null \\right-column { %s } }"
+                        % " ".join(right))
+
+    return "\n".join(rows)
+
+
+def _inject_header_layout(ly_source, meta):
+    """Insert our scoreTitleMarkup into the file-level \\paper block."""
+    markup = _build_score_title_markup(meta)
+    if not markup:
+        return ly_source
+    paper_start = ly_source.find("\\paper {")
+    if paper_start < 0:
+        return ly_source
+    brace = ly_source.find("{", paper_start)
+    if brace < 0:
+        return ly_source
+    inject = ("\n  %% custom header layout: title centred, instrument left, "
+              "composer/arranger right\n  scoreTitleMarkup = \\markup \\column {\n"
+              + markup + "\n  }\n")
+    return ly_source[:brace + 1] + inject + ly_source[brace + 1:]
+
 # ---------------------------------------------------------------------------
 # jianpu_ly 1.889 cannot handle 128th-note durations (crashes with
 # KeyError('128th')) and silently halves non-power-of-2 tuplets (e.g. 7:8).
@@ -292,7 +582,9 @@ def _prepare_xml_input(xml_path, temp_dir):
     """Return a path to the score XML ready for jianpu_ly.
 
     Reads the file (plain XML or .mxl archive), normalizes exotic note
-    types, and only writes a temporary copy when changes are needed.
+    types, and always returns a copy inside the scratch directory so that
+    jianpu_ly (which occasionally rewrites its input file) can never touch
+    the user's original MusicXML.
     """
     lower = xml_path.lower()
     if lower.endswith(".mxl"):
@@ -323,9 +615,6 @@ def _prepare_xml_input(xml_path, temp_dir):
                 data = raw.decode("latin-1")
 
     normalized = _normalize_musicxml(data)
-    if normalized == data:
-        return xml_path  # nothing to fix; let jianpu_ly read the original
-
     out = os.path.join(temp_dir,
                        os.path.splitext(os.path.basename(xml_path))[0] + ".musicxml")
     with open(out, "w", encoding="utf-8") as f:
@@ -416,6 +705,23 @@ def convert_musicxml_to_jianpu(xml_path):
         input_path = _prepare_xml_input(xml_path, temp_dir)
         in_dat = jianpu_ly.get_input([input_path])
         ly_source = jianpu_ly.process_input(in_dat)
+
+        # Metadata (title/composer/instrument) is read from the MusicXML
+        # independently of jianpu_ly so the PDF header can be laid out the way
+        # we want it (see extract_musicxml_metadata/_inject_header_layout).
+        meta = {}
+        try:
+            meta = extract_musicxml_metadata(input_path)
+        except Exception:
+            pass  # never fail the whole conversion over a header
+        if any((meta.get(k) or "").strip()
+               for k in ("title", "composer", "arranger", "instrument")):
+            ly_source = _replace_header_blocks(ly_source, meta)
+            ly_source = _inject_header_layout(ly_source, meta)
+
+        # jianpu_ly cannot resize its dynamic marks; inject the smaller
+        # DynamicText override into every voice before LilyPond compiles.
+        ly_source = _inject_dynamic_font_size(ly_source)
 
         # Save strictly as UTF-8
         with open(temp_ly, "w", encoding="utf-8") as f:

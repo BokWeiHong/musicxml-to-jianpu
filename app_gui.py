@@ -186,8 +186,12 @@ def _collapse_scale_sweeps(xml_text):
     if cur_start is not None:
         groups.append((cur_start, len(notes) - 1))
 
-    # find which groups are qualifying scale sweeps
-    drop_ranges = []  # (start_char, end_char) spans to remove (whole <note>s)
+    # Find qualifying scale sweeps and replace each group with only its
+    # lowest and highest notes.  The arpeggio squiggle is dropped (the sweep
+    # is marked with an arrow instead) and the lowest note carries a unique
+    # <fingering>SWP</fingering> token so the .ly post-processor can anchor
+    # that arrow to this exact chord.
+    replacements = []  # (start_char, end_char, new_text)
     for start_i, end_i in groups:
         size = end_i - start_i + 1
         if size < 6:
@@ -209,18 +213,33 @@ def _collapse_scale_sweeps(xml_text):
         if not all(member_pitches[k + 1] > member_pitches[k]
                    for k in range(len(member_pitches) - 1)):
             continue  # not a rising scale run
-        # keep first and last, drop the middle <note> elements
-        for gi in range(start_i + 1, end_i):
-            drop_ranges.append((notes[gi].start(), notes[gi].end()))
 
-    if not drop_ranges:
+        def strip_arpeggio(note_xml):
+            return re.sub(r"<arpeggiate\b[^>]*/>", "", note_xml)
+
+        def tag_swp(note_xml):
+            if "<notations>" not in note_xml:
+                return note_xml.replace(
+                    "</pitch>",
+                    "</pitch><notations><technical>"
+                    "<fingering>SWP</fingering></technical></notations>", 1)
+            return note_xml.replace(
+                "<notations>",
+                "<notations><technical><fingering>SWP</fingering></technical>",
+                1)
+
+        first = tag_swp(strip_arpeggio(notes[start_i].group(0)))
+        last = strip_arpeggio(notes[end_i].group(0))
+        replacements.append((notes[start_i].start(), notes[end_i].end(),
+                             first + last))
+
+    if not replacements:
         return xml_text
 
-    # remove from the end so earlier character offsets stay valid
-    drop_ranges.sort(reverse=True)
+    replacements.sort(reverse=True)
     out = xml_text
-    for a, b in drop_ranges:
-        out = out[:a] + out[b:]
+    for a, b, new_text in replacements:
+        out = out[:a] + new_text + out[b:]
     return out
 
 
@@ -763,6 +782,51 @@ class _StreamSink:
     errors = "replace"
 
 
+def _mark_sweep_arrows(ly_source, font_name=_JIANPU_CJK_FONT):
+    """Place an ascending-sweep arrow above each collapsed octave chord.
+
+    The XML collapse tags each collapsed chord's lowest note with a
+    <fingering>SWP</fingering> marker; jianpu_ly renders that as a finger
+    markup placed just after the chord (annotations on chords are deferred
+    to the next event).  Here we find each marker, delete it, and insert a
+    text script right before the chord it labels, so the arrow is drawn
+    above that chord.  All backslashes are built with chr() on purpose.
+    """
+    bs = chr(92)                        # backslash
+    q = chr(34)                         # double quote
+    jp_end = ly_source.find("% === END JIANPU STAFF ===")
+    if jp_end < 0:
+        return ly_source
+    head, tail = ly_source[:jp_end], ly_source[jp_end:]
+    while q + "SWP" + q in head:
+        i = head.find(q + "SWP" + q)
+        start = head.rfind(bs + "finger", 0, i)
+        end = head.find("}", i)
+        end = end + 1 if end >= 0 else i + 5
+        if start < 0:
+            start = i
+        chord = head.rfind("< " + bs + "note-mod", 0, start)
+        if chord >= 0:
+            arrow = ("^ " + bs + "markup { " + bs
+                     + "override #'(font-name . " + q + font_name + q + ") "
+                     + q + chr(0x2197) + q + " } ")
+            head = head[:chord] + arrow + head[chord:start] + head[end:]
+        else:
+            head = head[:start] + head[end:]
+    # the same finger markers also appear in the western/MIDI parts; strip
+    # them there too (arrows are only meaningful in the jianpu staff)
+    while q + "SWP" + q in tail:
+        i = tail.find(q + "SWP" + q)
+        start = tail.rfind(bs + "finger", 0, i)
+        end = tail.find("}", i)
+        end = end + 1 if end >= 0 else i + 5
+        if start < 0:
+            start = i
+        tail = tail[:start] + tail[end:]
+    return head + tail
+
+
+
 def convert_musicxml_to_jianpu(xml_path):
     """
     Convert a MusicXML file to a Jianpu PDF next to the original file.
@@ -842,6 +906,9 @@ def convert_musicxml_to_jianpu(xml_path):
 
         # Chinese annotations (扫弦/扫 etc.) must render in a CJK font.
         ly_source = _inject_cjk_text_font(ly_source)
+
+        # Attach ascending-sweep arrows to collapsed octave runs.
+        ly_source = _mark_sweep_arrows(ly_source)
 
         # Save strictly as UTF-8
         with open(temp_ly, "w", encoding="utf-8") as f:

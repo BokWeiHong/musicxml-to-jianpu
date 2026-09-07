@@ -136,6 +136,95 @@ def _normalize_musicxml(xml_text):
                   lambda m: m.group(1) + _UNSUPPORTED_NOTE_TYPES[m.group(2)] + m.group(3),
                   xml_text)
 
+_STEP_SEMITONES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+_NOTE_RE = re.compile(r"<note[ >].*?</note>", re.S)
+
+
+def _note_pitch(note_xml):
+    """Approximate MIDI number of a note element (None if no pitch)."""
+    st = re.search(r"<step>([A-G])</step>", note_xml)
+    if not st:
+        return None
+    oc = re.search(r"<octave>(\d+)</octave>", note_xml)
+    if not oc:
+        return None
+    al = re.search(r"<alter>(-?\d+)</alter>", note_xml)
+    return ((int(oc.group(1)) + 1) * 12
+            + _STEP_SEMITONES[st.group(1)]
+            + int(al.group(1) if al else 0))
+
+
+def _collapse_scale_sweeps(xml_text):
+    """Collapse octave scale sweeps so jianpu does not stack 8+ numbers.
+
+    Guzheng scores often notate a fast one-octave scale run as a single
+    <arpeggiate/> chord of 6-8 notes (e.g. 6 7 1 2 3 4 5 6).  Jianpu-ly
+    stacks every member vertically, making an ugly, very tall column of
+    numbers.  If an arpeggiated chord has >= 6 notes that rise stepwise,
+    keep only the lowest and highest notes (the arpeggio squiggle still
+    tells the player to roll/sweep across the range).  Small rolled
+    chords (3-5 notes) are left untouched.
+    """
+    notes = list(_NOTE_RE.finditer(xml_text))
+    if len(notes) < 6:
+        return xml_text
+
+    # group consecutive <note>s that form a chord (first without <chord/>,
+    # the rest marked <chord/>)
+    groups = []  # (start_match_index, end_match_index)
+    cur_start = None
+    prev_end = None
+    for idx, m in enumerate(notes):
+        if "<chord/>" in m.group(0):
+            if cur_start is None:
+                cur_start = idx          # chord without an initial note
+            continue
+        if cur_start is not None:
+            groups.append((cur_start, idx - 1))
+            cur_start = None
+        cur_start = idx
+    if cur_start is not None:
+        groups.append((cur_start, len(notes) - 1))
+
+    # find which groups are qualifying scale sweeps
+    drop_ranges = []  # (start_char, end_char) spans to remove (whole <note>s)
+    for start_i, end_i in groups:
+        size = end_i - start_i + 1
+        if size < 6:
+            continue
+        member_pitches = []
+        ok = True
+        for gi in range(start_i, end_i + 1):
+            n = notes[gi].group(0)
+            if "<arpeggiate" not in n:
+                ok = False
+                break
+            p = _note_pitch(n)
+            if p is None:
+                ok = False
+                break
+            member_pitches.append(p)
+        if not ok:
+            continue
+        if not all(member_pitches[k + 1] > member_pitches[k]
+                   for k in range(len(member_pitches) - 1)):
+            continue  # not a rising scale run
+        # keep first and last, drop the middle <note> elements
+        for gi in range(start_i + 1, end_i):
+            drop_ranges.append((notes[gi].start(), notes[gi].end()))
+
+    if not drop_ranges:
+        return xml_text
+
+    # remove from the end so earlier character offsets stay valid
+    drop_ranges.sort(reverse=True)
+    out = xml_text
+    for a, b in drop_ranges:
+        out = out[:a] + out[b:]
+    return out
+
+
+
 
 _JIANPU_DYNAMIC_FONT_SIZE = -3
 
@@ -640,6 +729,9 @@ def _prepare_xml_input(xml_path, temp_dir):
                 data = raw.decode("latin-1")
 
     normalized = _normalize_musicxml(data)
+    # Collapse one-octave arpeggiated scale sweeps to their endpoints so
+    # jianpu does not render a tall stack of 8+ numbers (see function).
+    normalized = _collapse_scale_sweeps(normalized)
     out = os.path.join(temp_dir,
                        os.path.splitext(os.path.basename(xml_path))[0] + ".musicxml")
     with open(out, "w", encoding="utf-8") as f:

@@ -151,6 +151,31 @@ def _inject_dynamic_font_size(ly_source):
     return voice_open.sub(
         lambda m: m.group(0) + "\n\\override DynamicText.font-size = #%s" % size,
         ly_source)
+_JIANPU_CJK_FONT = "KaiTi"   # guzheng/erhu scores annotate sweeps etc. in KaiTi
+
+
+def _inject_cjk_text_font(ly_source, font_name=_JIANPU_CJK_FONT):
+    """Render MusicXML <words> Chinese annotations in a CJK-capable font.
+
+    jianpu_ly imports <words> (e.g. the guzheng sweep marks "扫"/"扫弦") as
+    plain text scripts (^"扫弦") and drops the font-family the score asked
+    for.  LilyPond then draws them via Pango's automatic fallback (usually
+    SimSun), not KaiTi.  Rewrite every text script that contains CJK
+    characters to use the intended font instead.
+    """
+    if not re.search(r"[\u4e00-\u9fff]", ly_source):
+        return ly_source
+    script_re = re.compile(r'([\^_])"([^"]*[\u4e00-\u9fff][^"]*)"')
+
+    def repl(m):
+        direction, text = m.group(1), m.group(2)
+        return ('%s \\markup { \\override #\'(font-name . "%s") "%s" }'
+                % (direction, font_name, text))
+
+    return script_re.sub(repl, ly_source)
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +747,9 @@ def convert_musicxml_to_jianpu(xml_path):
         # jianpu_ly cannot resize its dynamic marks; inject the smaller
         # DynamicText override into every voice before LilyPond compiles.
         ly_source = _inject_dynamic_font_size(ly_source)
+
+        # Chinese annotations (扫弦/扫 etc.) must render in a CJK font.
+        ly_source = _inject_cjk_text_font(ly_source)
 
         # Save strictly as UTF-8
         with open(temp_ly, "w", encoding="utf-8") as f:

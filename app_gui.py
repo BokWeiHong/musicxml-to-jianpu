@@ -805,13 +805,23 @@ def _mark_sweep_arrows(ly_source, font_name=_JIANPU_CJK_FONT):
         end = end + 1 if end >= 0 else i + 5
         if start < 0:
             start = i
+        # the collapsed chord sits right before this marker; find its
+        # closing ">duration" so the arrow can be attached as a tidy
+        # postfix (chord...>4 ^ arrow) instead of a separate event.
         chord = head.rfind("< " + bs + "note-mod", 0, start)
+        placed = False
         if chord >= 0:
-            arrow = ("^ " + bs + "markup { " + bs
-                     + "override #'(font-name . " + q + font_name + q + ") "
-                     + q + chr(0x2197) + q + " } ")
-            head = head[:chord] + arrow + head[chord:start] + head[end:]
-        else:
+            seg = head[chord:start]
+            close = re.search(r">\d+[.]*", seg)
+            if close:
+                anchor = chord + close.end()
+                arrow = ("^ " + bs + "markup { " + bs
+                         + "override #'(font-name . " + q + font_name + q + ") "
+                         + q + chr(0x2197) + q + " } ")
+                head = head[:start] + head[end:]       # drop the marker
+                head = head[:anchor] + arrow + head[anchor:]
+                placed = True
+        if not placed:
             head = head[:start] + head[end:]
     # the same finger markers also appear in the western/MIDI parts; strip
     # them there too (arrows are only meaningful in the jianpu staff)

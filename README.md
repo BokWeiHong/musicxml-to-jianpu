@@ -1,6 +1,6 @@
 # MusicXML to Jianpu (简谱) PDF Converter / MusicXML 转简谱 PDF 工具
 
----
+![App Screenshot](assets/assets/musicxml-to-jianpu.png)
 
 ## English
 

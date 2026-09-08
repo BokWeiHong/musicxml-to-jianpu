@@ -1,9 +1,9 @@
 # MusicXML → 简谱 (Jianpu) PDF Converter
 
-A single-file Windows desktop app that converts a MusicXML score into
-**numbered musical notation (jianpu / 简谱)** and compiles it to a PDF, saved
-next to the original file. It is used to produce guzheng/erhu-style practice
-sheets where the western staff is dropped and every note becomes a digit.
+A Windows desktop app that converts a MusicXML score into **numbered musical
+notation (jianpu / 简谱)** and compiles it to a PDF, saved next to the original
+file. It is used to produce guzheng/erhu-style practice sheets where the
+western staff is dropped and every note becomes a digit.
 
 Built around two engines:
 
@@ -13,8 +13,10 @@ Built around two engines:
   generated `.ly` source into the PDF (auto-located, or shipped as a portable
   `lilypond-2.26.0` tree next to the app).
 
-No web server, no cloud: everything runs locally, and the GUI, the library
-calls and all post-processing live in **`app_gui.py`** (one file).
+No web server, no cloud: everything runs locally. The code is organised as the
+small `jianpu_converter/` package (one module per responsibility) behind the
+`app_gui.py` launcher. Read the module docstrings — each one explains what it
+does and why.
 
 ---
 
@@ -49,10 +51,11 @@ calls and all post-processing live in **`app_gui.py`** (one file).
 ### End-to-end pipeline
 
 ```
- ┌───────────────┐     ┌────────────────────────────────────────────────┐
- │  tkinter GUI  │     │  convert_musicxml_to_jianpu(xml_path,          │
- │ (app_gui.py)  │ ──► │                       header_meta)             │
- └───────────────┘     └────────────────────────────────────────────────┘
+  GUI: jianpu_converter/gui.py  (launched via app_gui.py)
+       │
+       │   user picks a score, confirms the header fields,
+       ▼   clicks "Convert to Jianpu PDF"
+  convert_musicxml_to_jianpu(xml_path, header_meta)
                                     │
                 1  _prepare_xml_input()  ·  decode xml/.mxl → UTF-8 text
                 2  _normalize_musicxml() ·  map exotic <type>s (256th…)
@@ -82,8 +85,8 @@ results/errors are marshalled back with `root.after(...)`.
 ### Why jianpu_ly gets "patched" (two worlds)
 
 jianpu_ly 1.889 crashes on a few notations found in real scores (128th notes,
-`7:8` tuplets, multi-part octave ambiguity, …). The fixes live in two tables
-at the top of `app_gui.py`:
+`7:8` tuplets, multi-part octave ambiguity, …). The fixes live in two tables in
+`jianpu_converter/patches.py`:
 
 * `_JIANPU_LY_DICT_PATCHES` — string replacements inside jianpu_ly's duration
   tables;
@@ -104,18 +107,21 @@ writes backslash literals in source. Commands are assembled with
 `chr(92)`/`chr(34)` (see `_mark_sweep_arrows()`), or strings are escaped via
 `_lp_escape()`. Follow the same convention in new code.
 
-### Code map (`app_gui.py`, ~1,280 lines)
+### Code map (the `jianpu_converter/` package)
 
-| Area | Functions |
-|---|---|
-| LilyPond lookup / cache | `find_lilypond`, `_freshen_lilypond_ccache` |
-| MusicXML pre-processing | `_normalize_musicxml`, `_collapse_scale_sweeps`, `_prepare_xml_input` |
-| Metadata extraction | `_read_mxl_score_xml`, `extract_musicxml_metadata`, `_find_child(ren)`, `_iter_text`, `_strip_label`, `_note_pitch` |
-| .ly post-processing | `_inject_dynamic_font_size`, `_inject_cjk_text_font`, `_mark_sweep_arrows` |
-| Header markup | `_build_ly_header`, `_replace_header_blocks`, `_build_score_title_markup`, `_inject_header_layout`, `_lp_escape` |
-| jianpu_ly patching | `_JIANPU_LY_DICT_PATCHES`, `_JIANPU_LY_FUNC_PATCHES`, `_patch_jianpu_ly` |
-| Orchestration | `convert_musicxml_to_jianpu`, `_StreamSink` |
-| GUI | `JianpuConverterApp` (`_build_ui`, `_on_path_changed`, `_start_conversion_thread`, `_run_conversion`, …) |
+The app used to be one ~1,300-line file (`app_gui.py`); it was split into one
+small module per responsibility so each file stays easy to read. Every module
+starts with a docstring that explains its job.
+
+| Module | Responsibility | Main names |
+|---|---|---|
+| `jianpu_converter/lilypond.py` | LilyPond engine discovery + cache fix | `find_lilypond`, `_freshen_lilypond_ccache` |
+| `jianpu_converter/musicxml.py` | Read/clean input, extract metadata | `_prepare_xml_input`, `_normalize_musicxml`, `_collapse_scale_sweeps`, `extract_musicxml_metadata` |
+| `jianpu_converter/layout.py` | Edits to the generated `.ly` | `_build_ly_header`, `_replace_header_blocks`, `_build_score_title_markup`, `_inject_header_layout`, `_inject_dynamic_font_size`, `_inject_cjk_text_font`, `_mark_sweep_arrows`, `_lp_escape` |
+| `jianpu_converter/patches.py` | jianpu_ly fixes (tables + runtime) | `_JIANPU_LY_DICT_PATCHES`, `_JIANPU_LY_FUNC_PATCHES`, `_patch_jianpu_ly` |
+| `jianpu_converter/convert.py` | Orchestration | `convert_musicxml_to_jianpu`, `_StreamSink` |
+| `jianpu_converter/gui.py` | tkinter GUI + entry | `JianpuConverterApp`, `main` |
+| `app_gui.py` | Thin launcher (double-click / file association / exe) | calls `jianpu_converter.gui.main` |
 
 ---
 
@@ -123,25 +129,38 @@ writes backslash literals in source. Commands are assembled with
 
 ```
 D:\jianpu\
-├─ app_gui.py                  # the whole app: GUI + converter + post-processing
+├─ app_gui.py                  # entry point: launches the GUI (thin launcher)
+├─ run.bat                     # double-click to run from source (uses .venv)
+├─ requirements.txt            # pip dependencies (runtime + build)
+├─ README.md                   # this file
+├─ jianpu_converter\           # the actual application code (one module each)
+│  ├─ __init__.py              # package docstring + public API
+│  ├─ lilypond.py              # find the LilyPond engine, fix its ccache
+│  ├─ musicxml.py              # input cleaning + metadata extraction
+│  ├─ layout.py                # .ly post-processing (header, fonts, arrows)
+│  ├─ patches.py               # jianpu_ly fixes (tables + runtime patcher)
+│  ├─ convert.py               # conversion pipeline orchestrator
+│  ├─ gui.py                   # tkinter GUI + main()
+│  └─ __main__.py              # lets `python -m jianpu_converter` work
 ├─ patch_jianpu_ly_src.py      # build-time patcher → jianpu_ly_patched/
-├─ JianpuConverter.spec        # PyInstaller build script (canonical)
 ├─ make_icon.py                # regenerates assets\app.ico
-├─ assets\app.ico              # app / installer icon            (generated)
+├─ JianpuConverter.spec        # PyInstaller build script (canonical)
+├─ samples\                    # example scores to play with
+│  └─ 青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml
+├─ assets\                     # app / installer icon
 ├─ installer\
 │  └─ JianpuConverter.nsi      # NSIS installer script
-├─ release\                    # installer output                 (ignored by git)
-├─ dist\ build\                # PyInstaller output                (ignored by git)
-├─ jianpu_ly_patched\          # generated pre-patched jianpu_ly   (ignored by git)
-├─ lilypond-2.26.0\            # portable LilyPond engine          (ignored by git)
-└─ tools\nsis\                 # NSIS compiler                     (ignored by git)
+├─ release\                    # finished installer setup .exe   (ignored)
+├─ dist\ build\                # PyInstaller output               (ignored)
+├─ jianpu_ly_patched\          # generated pre-patched jianpu_ly  (ignored)
+├─ lilypond-2.26.0\            # portable LilyPond engine         (ignored)
+└─ tools\nsis\                 # NSIS compiler                    (ignored)
 ```
 
 `lilypond-2.26.0\`, `tools\`, `release\`, `dist\`, `build\` and
 `jianpu_ly_patched\` are git-ignored binary/tool trees: clone the source on a
 fresh machine and re-supply them (or point the app at a system LilyPond via
-`LILYPOND`/`PATH`). An example input lives at the repo root
-(`青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml`) for quick tests.
+`LILYPOND`/`PATH`). Example scores live in `samples\`.
 
 ---
 
@@ -159,14 +178,14 @@ python -m venv .venv
 
 # 2. dependencies
 .venv\Scripts\pip install --upgrade pip
-.venv\Scripts\pip install jianpu-ly      # runtime dependency
-.venv\Scripts\pip install pyinstaller     # only needed to build the .exe
+.venv\Scripts\pip install -r requirements.txt
 
 # 3. run the app
-.venv\Scripts\python app_gui.py
+.venv\Scripts\python app_gui.py          # or just double-click run.bat
+.venv\Scripts\python -m jianpu_converter # equivalent package entry point
 
 #    ... or open a score directly (also how the file-association launch works):
-.venv\Scripts\python app_gui.py "path\to\song.musicxml"
+.venv\Scripts\python app_gui.py "samples\青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml"
 ```
 
 When run from source, `convert_musicxml_to_jianpu()` auto-patches the
@@ -176,13 +195,13 @@ installed `jianpu_ly` in memory on first use — no manual step needed.
 
 ```powershell
 # imports + compiles, then prints the generated header markup
-.venv\Scripts\python -c "import app_gui; print(app_gui._build_score_title_markup({'title':'茉莉花','composer':'','arranger':'','instrument':'古筝'}))"
+.venv\Scripts\python -c "from jianpu_converter.layout import _build_score_title_markup; print(_build_score_title_markup({'title':'茉莉花','composer':'','arranger':'','instrument':'古筝'}))"
 
 # metadata detection on a real file
-.venv\Scripts\python -c "import app_gui, json; print(app_gui.extract_musicxml_metadata('青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml'))"
+.venv\Scripts\python -c "import json; from jianpu_converter.musicxml import extract_musicxml_metadata; print(extract_musicxml_metadata('samples\\青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml'))"
 
 # full headless conversion (needs LilyPond reachable)
-.venv\Scripts\python -c "import app_gui; print(app_gui.convert_musicxml_to_jianpu('song.musicxml'))"
+.venv\Scripts\python -c "from jianpu_converter import convert_musicxml_to_jianpu; print(convert_musicxml_to_jianpu('samples\\青城山下白素贞 & 壁上观 (E调)-Guzheng.musicxml'))"
 ```
 
 ### LilyPond lookup order (for troubleshooting)
@@ -282,24 +301,24 @@ Notes:
 
 | You want to… | Touch |
 |---|---|
-| Fix an error for a specific MusicXML file | Start from `convert_musicxml_to_jianpu()` and work backwards: is the failure in jianpu_ly (→ patch table entry), in our XML pre-processing (`_normalize_musicxml`, `_collapse_scale_sweeps`), in the .ly post-processing, or in the GUI layer? |
-| Fix something jianpu_ly does wrong/ugly in the notation | Add a replacement pair to `_JIANPU_LY_DICT_PATCHES` / `_JIANPU_LY_FUNC_PATCHES` **and** keep the equivalent code inside `_patch_jianpu_ly()` in sync. |
-| Change PDF layout / fonts / header | `_build_*_header*`, `_inject_*`, `_mark_sweep_arrows`, `_lp_escape`. |
-| Change the GUI | `JianpuConverterApp` in the lower half of `app_gui.py`. |
+| Fix an error for a specific MusicXML file | Start from `convert_musicxml_to_jianpu()` (`convert.py`) and work backwards: is the failure in jianpu_ly (→ `patches.py` entry), in our XML pre-processing (`musicxml.py`: `_normalize_musicxml`, `_collapse_scale_sweeps`), in the `.ly` post-processing (`layout.py`), or in the GUI layer (`gui.py`)? |
+| Fix something jianpu_ly does wrong/ugly in the notation | Add a replacement pair to `_JIANPU_LY_DICT_PATCHES` / `_JIANPU_LY_FUNC_PATCHES` in `patches.py` **and** keep the equivalent code inside `_patch_jianpu_ly()` in sync. |
+| Change PDF layout / fonts / header | `layout.py`: `_build_*_header*`, `_inject_*`, `_mark_sweep_arrows`, `_lp_escape`. |
+| Change the GUI | `JianpuConverterApp` in `gui.py`. |
 | Update packaging | `patch_jianpu_ly_src.py`, `JianpuConverter.spec`, `installer\JianpuConverter.nsi`, `release\README.txt`. |
 
 ### Workflow for a converter bug
 
-1. **Reproduce with a file**: prefer a real export (the repo root sample works
-   well). Note the LilyPond version found and the exact error text (conversion
-   errors now include jianpu_ly stderr diagnostics automatically).
+1. **Reproduce with a file**: prefer a real export (the sample in `samples\`
+   works well). Note the LilyPond version found and the exact error text
+   (conversion errors now include jianpu_ly stderr diagnostics automatically).
 2. **Decide the layer** (see table above). If it is jianpu_ly, also run
    `patch_jianpu_ly_src.py` and check for `WARN: … patch not found` — a missing
    `old` string means the tables drifted from the installed library version.
 3. **Patch, then verify in BOTH worlds**:
    ```powershell
-   .venv\Scripts\python -m py_compile app_gui.py
-   .venv\Scripts\python -c "import app_gui; print(app_gui.convert_musicxml_to_jianpu('your_file.musicxml'))"
+   .venv\Scripts\python -m py_compile app_gui.py jianpu_converter\*.py
+   .venv\Scripts\python -c "from jianpu_converter import convert_musicxml_to_jianpu; print(convert_musicxml_to_jianpu('your_file.musicxml'))"
    .venv\Scripts\python patch_jianpu_ly_src.py   # must print 128th/7-8/marker all True
    ```
 4. **Look at the rendered PDF**, not just the exit code: check bar alignment,
@@ -312,8 +331,13 @@ Notes:
 
 ### Code conventions
 
-* Everything stays in **`app_gui.py`** (single-file philosophy) unless the
-  change is genuinely a build/packaging concern.
+* **Put code in the `jianpu_converter/` module that owns the concern**
+  (see the code map). New helpers belong next to their users — do not grow
+  one file back into a mega-module; when a responsibility outgrows its module,
+  split a new one and update the README table + `__init__.py` docstring.
+* Every module and every non-trivial function keeps a docstring explaining the
+  *why* (not just the what). Use comments liberally inside tricky logic —
+  conversions and regex-based rewrites are where this pays off.
 * **Python standard library only** at runtime, plus `jianpu_ly`. No new
   third-party runtime dependencies (the venv also carries music21 etc. only as
   leftover/test convenience — don't import them in the app).
@@ -324,8 +348,8 @@ Notes:
   must keep matching across small upstream changes.
 * Files are CRLF, UTF-8. Comments may be English or Chinese; keep new comments
   in the language of the surrounding block.
-* The module docstring of `app_gui.py` documents LilyPond lookup order; update
-  it if that logic changes.
+* The `find_lilypond()` docstring in `jianpu_converter/lilypond.py` documents
+  the engine lookup order; update it if that logic changes.
 
 ### Reporting issues / feature requests
 
@@ -362,7 +386,8 @@ When opening an issue, please include:
   translator this app drives in-process; all jianpu notation logic is its.
 * **[LilyPond]** — the GNU music engraver that produces the PDF.
 * The tkinter GUI, jianpu_ly patch layer, MusicXML pre-processing and `.ly`
-  post-processing in `app_gui.py` are original work in this repository.
+  post-processing in the `jianpu_converter/` package are original work in this
+  repository.
 
 [jianpu_ly]: https://ssb22.user.srcf.net/mwrhome/jianpu-ly.html
 [LilyPond]: https://lilypond.org/

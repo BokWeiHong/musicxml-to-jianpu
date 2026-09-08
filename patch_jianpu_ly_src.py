@@ -18,7 +18,12 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-import app_gui  # provides _JIANPU_LY_DICT_PATCHES / _JIANPU_LY_FUNC_PATCHES
+from jianpu_converter.patches import (
+    _JIANPU_LY_DICT_PATCHES,
+    _JIANPU_LY_FUNC_PATCHES,
+)
+# (patch tables live in jianpu_converter/patches.py — see also the runtime
+#  patcher _patch_jianpu_ly() there; keep both worlds in sync)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(HERE, "jianpu_ly_patched")
@@ -33,11 +38,11 @@ def main():
 
     # Apply every replacement used by the runtime patch, plus the module
     # level note_regex fix and the "already patched" marker.
-    for old, new in app_gui._JIANPU_LY_DICT_PATCHES:
+    for old, new in _JIANPU_LY_DICT_PATCHES:
         if old not in src:
             print("WARN: dict patch not found:", old[:60])
         src = src.replace(old, new)
-    for old, new in app_gui._JIANPU_LY_FUNC_PATCHES:
+    for old, new in _JIANPU_LY_FUNC_PATCHES:
         if old not in src:
             print("WARN: func patch not found:", old[:60])
         src = src.replace(old, new)

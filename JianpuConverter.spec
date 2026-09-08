@@ -1,9 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+# Jianpu Converter -- PyInstaller build script (onedir).
+#
+#   .venv\Scripts\python -m PyInstaller JianpuConverter.spec
+#   Copy-Item -Recurse -Force lilypond-2.26.0 dist\JianpuConverter\
+#   makensis installer\JianpuConverter.nsi
+#
+# app_gui.py is a thin launcher for the jianpu_converter package; pathex lists
+# the repo root (so the package is found) BEFORE jianpu_ly_patched (so the
+# pre-patched 128th-ready jianpu_ly is bundled instead of the stock one).
+
 a = Analysis(
     ['D:/jianpu/app_gui.py'],
-    pathex=['D:/jianpu/jianpu_ly_patched'],
+    pathex=['D:/jianpu', 'D:/jianpu/jianpu_ly_patched'],
     binaries=[],
     datas=[],
     hiddenimports=[],

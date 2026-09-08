@@ -1,0 +1,10 @@
+# ---------------------------------------------------------------------------
+# Jianpu Converter dependencies
+#
+# Runtime: the app itself uses only the Python standard library + jianpu_ly.
+# PyInstaller is needed only when building the .exe / installer.
+#
+#   .venv\Scripts\pip install -r requirements.txt
+# ---------------------------------------------------------------------------
+jianpu-ly
+pyinstaller

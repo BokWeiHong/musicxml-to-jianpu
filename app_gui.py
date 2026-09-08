@@ -331,15 +331,53 @@ def _strip_label(value, *prefixes):
     return value
 
 
+def _read_mxl_score_xml(mxl_path):
+    """Return the raw bytes of the score XML stored inside a .mxl container.
+
+    Uses the rootfile from META-INF/container.xml when present and otherwise
+    falls back to the first .xml member outside META-INF.
+    """
+    import zipfile
+    from xml.etree import ElementTree as _ET
+
+    with zipfile.ZipFile(mxl_path) as zf:
+        names = zf.namelist()
+        inner = None
+        if "META-INF/container.xml" in names:
+            try:
+                container = _ET.fromstring(zf.read("META-INF/container.xml"))
+                for el in container.iter():
+                    if el.tag.rsplit("}", 1)[-1] == "rootfile" \
+                            and el.get("full-path"):
+                        inner = el.get("full-path")
+                        break
+            except Exception:
+                inner = None
+        if inner is None or inner not in names:
+            candidates = [n for n in names
+                          if n.lower().endswith(".xml")
+                          and not n.lower().startswith("meta-inf/")]
+            candidates.sort(key=len)
+            inner = candidates[0] if candidates else None
+        if inner is None:
+            raise ValueError("No score XML found inside the .mxl file")
+        return zf.read(inner)
+
+
 def extract_musicxml_metadata(xml_path):
-    """Return display metadata parsed from a MusicXML file (.musicxml/.xml).
+    """Return display metadata parsed from a MusicXML file (.musicxml/.xml/.mxl).
 
     Returns a dict with keys: title, composer, arranger, instrument,
     instrument_type.  Any field that cannot be found is an empty string.
     Handles the default MusicXML namespace, UTF-8/UTF-16 files and BOMs, for
-    both partwise and timewise roots.
+    both partwise and timewise roots.  .mxl (compressed MusicXML) containers
+    are transparently unzipped first.
     """
-    raw = open(xml_path, "rb").read()
+    if xml_path.lower().endswith(".mxl"):
+        raw = _read_mxl_score_xml(xml_path)
+    else:
+        raw = open(xml_path, "rb").read()
+
     if raw.startswith(b"\xef\xbb\xbf"):
         data = raw.decode("utf-8-sig")
     elif raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
@@ -413,6 +451,28 @@ def extract_musicxml_metadata(xml_path):
                 if words:
                     instrument = _iter_text(words[0])
                 break
+
+    # Fallbacks for files that do not use <credit> elements at all and put
+    # the metadata in <work>/<movement-title> and <identification><creator>
+    # instead (the classic Recordare/Sibelius export layout).
+    if not title:
+        work = _find_child(root, "work")
+        work_title = _find_child(work, "work-title") if work is not None else None
+        if work_title is not None:
+            title = _iter_text(work_title)
+        if not title:
+            movement_title = _find_child(root, "movement-title")
+            if movement_title is not None:
+                title = _iter_text(movement_title)
+    if not composer or not arranger:
+        identification = _find_child(root, "identification")
+        if identification is not None:
+            for creator in _find_children(identification, "creator"):
+                creator_type = (creator.get("type") or "").strip().lower()
+                if creator_type == "composer" and not composer:
+                    composer = _iter_text(creator)
+                elif creator_type == "arranger" and not arranger:
+                    arranger = _iter_text(creator)
 
     # Drop redundant 作曲人：/ 编配人： prefixes; the header layout already
     # communicates which field is which.
@@ -515,7 +575,7 @@ def _build_score_title_markup(meta):
 
     rows = []
     if title:
-        rows.append("    \\fill-line { \\larger \\bold \\fromproperty #'header:title }")
+        rows.append("    \\fill-line { \\override #'(font-name . \"SimHei\") \\bold \\fontsize #4 \\fromproperty #'header:title }")
 
     left = "\\fromproperty #'header:instrument" if instrument else ""
     right = []
@@ -837,7 +897,7 @@ def _mark_sweep_arrows(ly_source, font_name=_JIANPU_CJK_FONT):
 
 
 
-def convert_musicxml_to_jianpu(xml_path):
+def convert_musicxml_to_jianpu(xml_path, header_meta=None):
     """
     Convert a MusicXML file to a Jianpu PDF next to the original file.
 
@@ -897,18 +957,26 @@ def convert_musicxml_to_jianpu(xml_path):
         in_dat = jianpu_ly.get_input([input_path])
         ly_source = jianpu_ly.process_input(in_dat)
 
-        # Metadata (title/composer/instrument) is read from the MusicXML
-        # independently of jianpu_ly so the PDF header can be laid out the way
-        # we want it (see extract_musicxml_metadata/_inject_header_layout).
+        # Metadata (title/composer/instrument) drives the PDF header layout
+        # (see extract_musicxml_metadata/_inject_header_layout).  The GUI lets
+        # the user confirm/edit these values before exporting and passes them
+        # in header_meta; when header_meta is provided its values are
+        # authoritative - including empty ones, so a cleared field stays
+        # cleared instead of being resurrected from the file.
         meta = {}
-        try:
-            meta = extract_musicxml_metadata(input_path)
-        except Exception:
-            pass  # never fail the whole conversion over a header
+        if header_meta is not None:
+            meta = {k: (header_meta.get(k) or "").strip()
+                    for k in ("title", "composer", "arranger", "instrument")}
+        else:
+            try:
+                meta = extract_musicxml_metadata(input_path)
+            except Exception:
+                meta = {}  # never fail the whole conversion over a header
         if any((meta.get(k) or "").strip()
                for k in ("title", "composer", "arranger", "instrument")):
             ly_source = _replace_header_blocks(ly_source, meta)
             ly_source = _inject_header_layout(ly_source, meta)
+
 
         # jianpu_ly cannot resize its dynamic marks; inject the smaller
         # DynamicText override into every voice before LilyPond compiles.
@@ -983,7 +1051,7 @@ class JianpuConverterApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MusicXML to 简谱 (Jianpu) Converter")
-        self.root.geometry("540x380")
+        self.root.geometry("590x570")
         self.root.resizable(False, False)
 
         # Style configuration
@@ -993,7 +1061,17 @@ class JianpuConverterApp:
         self.input_file_path = tk.StringVar()
         self.output_pdf_path = ""
 
+        # Score details shown in the GUI (auto-filled when a file is chosen,
+        # editable by the user before exporting).
+        self.meta_title = tk.StringVar()
+        self.meta_composer = tk.StringVar()
+        self.meta_arranger = tk.StringVar()
+        self.meta_instrument = tk.StringVar()
+
+
         self._build_ui()
+        # Keep the editable score details in sync with the chosen file.
+        self.input_file_path.trace_add("write", self._on_path_changed)
         self._prefill_from_args()
 
     def _prefill_from_args(self):
@@ -1046,7 +1124,36 @@ class JianpuConverterApp:
         btn_browse = ttk.Button(file_select_frame, text="Browse...", command=self._browse_file)
         btn_browse.pack(side="right")
 
+        # Score Details section: the title/composer/arranger/instrument that
+        # will be printed on the PDF header.  Auto-filled from the file so the
+        # user can confirm or correct them before exporting.
+        details_label = tk.Label(body_frame,
+                                 text="Score details \u2014 confirm or edit before exporting:",
+                                 font=("Segoe UI", 10, "bold"))
+        details_label.pack(anchor="w", pady=(0, 6))
+
+        details_frame = tk.Frame(body_frame, bg="#F1F5F9", padx=12, pady=10,
+                                 highlightbackground="#CBD5E1",
+                                 highlightthickness=1)
+        details_frame.pack(fill="x", pady=(0, 14))
+
+        for _row, (_name, _var) in enumerate((
+                ("Title", self.meta_title),
+                ("Composer", self.meta_composer),
+                ("Arranger", self.meta_arranger),
+                ("Instrument", self.meta_instrument),
+        )):
+            tk.Label(details_frame, text=_name + ":", bg="#F1F5F9",
+                     font=("Segoe UI", 9, "bold"), width=12,
+                     anchor="w").grid(row=_row, column=0, sticky="w",
+                                      padx=(0, 6), pady=2)
+            ttk.Entry(details_frame, textvariable=_var,
+                      font=("Segoe UI", 10)).grid(row=_row, column=1,
+                                                  sticky="ew", pady=2)
+            details_frame.columnconfigure(1, weight=1)
+
         # Action Button
+
         self.btn_convert = tk.Button(
             body_frame,
             text="Convert to Jianpu PDF",
@@ -1077,14 +1184,35 @@ class JianpuConverterApp:
     def _browse_file(self):
         file_path = filedialog.askopenfilename(
             title="Select MusicXML File",
-            filetypes=[("MusicXML Files", "*.musicxml *.xml"), ("All Files", "*.*")]
+            filetypes=[("MusicXML Files", "*.musicxml *.xml *.mxl"), ("All Files", "*.*")]
         )
         if file_path:
             self.input_file_path.set(file_path)
             self.status_var.set("File selected. Click Convert.")
             self.btn_open_pdf.config(state="disabled")
 
+    def _on_path_changed(self, *_args):
+        """Auto-fill the editable score details whenever the file changes."""
+        path = self.input_file_path.get().strip()
+        for _var in (self.meta_title, self.meta_composer,
+                     self.meta_arranger, self.meta_instrument):
+            _var.set("")
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            meta = extract_musicxml_metadata(path)
+        except Exception:
+            # Unreadable/unsupported file: leave the fields empty so the
+            # user can still type the header values by hand.
+            return
+        self.meta_title.set(meta.get("title") or "")
+        self.meta_composer.set(meta.get("composer") or "")
+        self.meta_arranger.set(meta.get("arranger") or "")
+        self.meta_instrument.set(meta.get("instrument") or "")
+        self.status_var.set("Details loaded from the file - confirm and click Convert.")
+
     def _start_conversion_thread(self):
+
         file_path = self.input_file_path.get().strip()
         if not file_path or not os.path.exists(file_path):
             messagebox.showwarning("File Missing", "Please select a valid .musicxml or .xml file first.")
@@ -1106,13 +1234,24 @@ class JianpuConverterApp:
         self.status_var.set("Running jianpu-ly and compiling with LilyPond...")
         self.status_label.config(fg="#4F46E5")
 
+        # Pass the confirmed/edited score details so the PDF header prints
+        # exactly what the user sees (empty values are respected as cleared).
+        header_meta = {
+            "title": self.meta_title.get().strip(),
+            "composer": self.meta_composer.get().strip(),
+            "arranger": self.meta_arranger.get().strip(),
+            "instrument": self.meta_instrument.get().strip(),
+        }
+
         # Run conversion in background to prevent GUI freeze
-        thread = threading.Thread(target=self._run_conversion, args=(file_path,), daemon=True)
+        thread = threading.Thread(target=self._run_conversion,
+                                  args=(file_path, header_meta), daemon=True)
+
         thread.start()
 
-    def _run_conversion(self, xml_path):
+    def _run_conversion(self, xml_path, header_meta=None):
         try:
-            out_pdf_target = convert_musicxml_to_jianpu(xml_path)
+            out_pdf_target = convert_musicxml_to_jianpu(xml_path, header_meta=header_meta)
             self.output_pdf_path = out_pdf_target
             self.root.after(0, self._on_success, out_pdf_target)
         except Exception as err:

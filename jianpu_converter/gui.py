@@ -11,18 +11,23 @@ import os
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 from .convert import convert_musicxml_to_jianpu
 from .lilypond import find_lilypond
 from .musicxml import extract_musicxml_metadata
 
+# Public GitHub repository for this app: the clickable footer link invites
+# users to grab the source code and play around with it.
+GITHUB_REPO_URL = "https://github.com/BokWeiHong/musicxml-to-jianpu"
+
 
 class JianpuConverterApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MusicXML to 简谱 (Jianpu) Converter")
-        self.root.geometry("590x570")
+        self.root.geometry("590x612")
         self.root.resizable(False, False)
 
         # Style configuration
@@ -77,6 +82,33 @@ class JianpuConverterApp:
             bg="#1E293B"
         )
         sub_label.pack()
+
+        # Footer bar: points users at the public GitHub repository so they can
+        # download the code and play around with it. Styled like a hyperlink —
+        # hover brightens it, clicking opens the repo in the default browser.
+        footer_frame = tk.Frame(self.root, bg="#1E293B", height=38)
+        footer_frame.pack(side="bottom", fill="x")
+        footer_frame.pack_propagate(False)
+
+        footer_hint = tk.Label(
+            footer_frame,
+            text="Open source  \u00b7  come play with the code:",
+            bg="#1E293B", fg="#94A3B8", font=("Segoe UI", 9),
+        )
+        footer_hint.pack(side="left", padx=(16, 4), pady=9)
+
+        github_link = tk.Label(
+            footer_frame,
+            text=GITHUB_REPO_URL.replace("https://", ""),
+            bg="#1E293B", fg="#38BDF8", cursor="hand2",
+            font=("Segoe UI", 9, "underline"),
+        )
+        github_link.pack(side="left", pady=9)
+        github_link.bind(
+            "<Button-1>", lambda _event: webbrowser.open(GITHUB_REPO_URL)
+        )
+        github_link.bind("<Enter>", lambda _e: github_link.config(fg="#7DD3FC"))
+        github_link.bind("<Leave>", lambda _e: github_link.config(fg="#38BDF8"))
 
         # Main Body Frame
         body_frame = tk.Frame(self.root, padx=25, pady=20)

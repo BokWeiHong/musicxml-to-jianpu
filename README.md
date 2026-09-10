@@ -29,6 +29,7 @@ Everything runs locally on your PC. No web servers, no uploads, and no internet 
 * **Rests are zeros:** every rest beat prints as `0` (whole rest → `0 0 0 0`, half rest → `0 0`); the `–` dash is kept only for held notes. A run of silent bars still stays combined into a single multi-measure rest (`|--5--|`) to save space.
 * **Adjustable bar numbers:** pick how often measure numbers are printed (every 1/2/3/5/10 bars) or turn them off with the **Bar numbers** dropdown.
 * **No console flash:** converting from the installed app no longer pops up a command window.
+* **Updates itself:** the installed app checks GitHub on startup; when a newer release exists it offers **Update now**, downloads the new installer, installs it silently and reopens by itself. (Links are in the header: `v<version> · Check for updates`.)
 
 ---
 
@@ -88,11 +89,39 @@ To test conversion directly from PowerShell without the GUI:
 
 ### Sharing with others
 
-To share this with friends on Windows, give them `release\JianpuConverter-Setup-1.0.0.exe`.
+To share this with friends on Windows, give them `release\JianpuConverter-Setup-1.0.1.exe`.
 
 * Installs per-user without requiring admin privileges.
 * Creates desktop/start shortcuts and associates `.musicxml` files.
 * Since the executable is not code-signed, SmartScreen might show a warning. Tell them to click **More info** and then **Run anyway**.
+* **After that you never have to send them anything again:** new versions are announced inside the app (see "Publishing an update" below).
+
+#### Publishing an update (friends then update themselves)
+
+1. **Bump the version** (updates `__init__.py`, the installer script, README and `release\README.txt`):
+   ```powershell
+   .venv\Scripts\python bump_version.py patch      # 1.0.0 -> 1.0.1 (or minor / major / 1.2.3)
+   ```
+2. **Rebuild** the exe and installer:
+   ```powershell
+   .venv\Scripts\python patch_jianpu_ly_src.py
+   .venv\Scripts\python -m PyInstaller JianpuConverter.spec
+   Copy-Item -Recurse -Force lilypond-2.26.0 dist\JianpuConverter\
+   tools\nsis\nsis-3.09\makensis.exe installer\JianpuConverter.nsi
+   ```
+3. **Publish it to GitHub** — either with the helper (one command):
+   ```powershell
+   set GITHUB_TOKEN=ghp_your_token        # classic token with the "repo" scope
+   .venv\Scripts\python publish_release.py --notes "what changed"
+   ```
+   …or by hand: GitHub → **Releases → Draft a new release** → tag `v1.0.1`
+   (create the tag on publish, target `main`) → attach
+   `release\JianpuConverter-Setup-1.0.1.exe` → **Publish release**.
+
+That's it. Every installed app checks `api.github.com/.../releases/latest` about a
+second after it starts, and its owner just clicks **Update now**. The tag **must**
+look like `v1.0.1` and the release must **not** be a draft or pre-release, or the
+app will ignore it.
 
 #### Building the installer from source
 
@@ -126,7 +155,10 @@ The completed setup will be in `release\`.
 * `jianpu_converter/layout.py` — LilyPond post-processing (fonts, headings, markings).
 * `jianpu_converter/patches.py` — Bug fixes for upstream `jianpu_ly`.
 * `jianpu_converter/lilypond.py` — Finds the LilyPond binary and manages its cache.
+* `jianpu_converter/updater.py` — Looks for a newer GitHub release, downloads the installer, runs it silently.
 * `patch_jianpu_ly_src.py` — Build helper for the PyInstaller bundle.
+* `bump_version.py` — Writes a new version into every file that stores it.
+* `publish_release.py` — Creates the GitHub release and uploads the installer.
 
 ---
 
@@ -176,6 +208,7 @@ When running from Python source, the app patches `jianpu_ly` dynamically in memo
 * **休止符统一为 0：** 每个休止拍都写成 `0`（全休止 `0 0 0 0`，二分休止 `0 0`），`–` 只用于音符的延长。连续多小节的休止仍会合并成一个连休标记（如 `|--5--|`），保持版面紧凑。
 * **小节号可自定义：** 在 **Bar numbers** 下拉框中设置每 1/2/3/5/10 小节显示一次小节号，也可以选择完全不显示。
 * **不再弹出命令行窗口：** 安装版转换时不会再闪出黑色 cmd 窗口。
+* **自动更新：** 安装版启动后会检查 GitHub，发现新版本时提示 **Update now**，自动下载并静默安装，然后重新打开自己。标题右上角有 `v版本号 · Check for updates` 可以随时手动检查。
 
 ---
 
@@ -235,11 +268,38 @@ python -m venv .venv
 
 ### 分享安装包
 
-如果要把工具发给其他人使用，直接发送 `release\JianpuConverter-Setup-1.0.0.exe` 即可：
+如果要把工具发给其他人使用，直接发送 `release\JianpuConverter-Setup-1.0.1.exe` 即可：
 
 * 安装在当前用户目录下，不需要管理员权限。
 * 自动创建桌面与开始菜单快捷方式，并关联 `.musicxml` 文件（支持双击直接打开）。
 * 因为个人打包没有购买企业代码签名证书，Windows SmartScreen 可能会弹出安全提醒，点击 **更多信息** 然后选择 **仍要运行** 即可。
+* **以后就不用再发新安装包给他们了：** 新版本会在软件内提示（见下面“发布新版本”）。
+
+#### 发布新版本（朋友那边会自动更新）
+
+1. **修改版本号**（会同时更新 `__init__.py`、安装脚本、README 和 `release\README.txt`）：
+   ```powershell
+   .venv\Scripts\python bump_version.py patch      # 1.0.0 -> 1.0.1（也可用 minor / major / 1.2.3）
+   ```
+2. **重新打包** exe 和安装包：
+   ```powershell
+   .venv\Scripts\python patch_jianpu_ly_src.py
+   .venv\Scripts\python -m PyInstaller JianpuConverter.spec
+   Copy-Item -Recurse -Force lilypond-2.26.0 dist\JianpuConverter\
+   tools\nsis\nsis-3.09\makensis.exe installer\JianpuConverter.nsi
+   ```
+3. **发布到 GitHub**，可以用脚本一条命令完成：
+   ```powershell
+   set GITHUB_TOKEN=ghp_你的令牌        # 需要带 "repo" 权限的 classic token
+   .venv\Scripts\python publish_release.py --notes "本次更新内容"
+   ```
+   也可以手动操作：GitHub → **Releases → Draft a new release** → 标签填 `v1.0.1`
+   （发布时创建标签，目标选 `main`）→ 上传
+   `release\JianpuConverter-Setup-1.0.1.exe` → **Publish release**。
+
+完成后，所有已安装的软件在启动约 1 秒后会查询
+`api.github.com/.../releases/latest`，朋友只要点一下 **Update now** 就升级好了。
+注意：标签必须是 `v1.0.1` 这种格式，而且不能保存为 draft 或 pre-release，否则软件会忽略它。
 
 #### 本地构建安装包
 
@@ -273,7 +333,10 @@ tools\nsis\nsis-3.09\makensis.exe installer\JianpuConverter.nsi
 * `jianpu_converter/layout.py` — LilyPond 文本排版优化（字体、标题、符号）。
 * `jianpu_converter/patches.py` — `jianpu_ly` 库的补丁映射与修复规则。
 * `jianpu_converter/lilypond.py` — 自动查找 LilyPond 路径并清理字库缓存。
+* `jianpu_converter/updater.py` — 检查 GitHub 新版本、下载安装包并静默运行。
 * `patch_jianpu_ly_src.py` — 专为 PyInstaller 打包构建使用的静态补丁生成脚本。
+* `bump_version.py` — 一键修改所有存放版本号的文件。
+* `publish_release.py` — 创建 GitHub Release 并上传安装包。
 
 ---
 

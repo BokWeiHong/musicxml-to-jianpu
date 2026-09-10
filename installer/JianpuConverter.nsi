@@ -1,23 +1,41 @@
 ; ---------------------------------------------------------------------------
 ; Jianpu Converter -- NSIS installer script
 ; Build:  makensis.exe JianpuConverter.nsi
-; Produces: ..\release\JianpuConverter-Setup.exe
+; Produces: ..\release\JianpuConverter-Setup-<version>.exe
 ; Per-user install (no administrator rights required).
+;
+; Silent self-update contract (used by jianpu_converter/updater.py):
+;     JianpuConverter-Setup-1.0.1.exe /S /RELAUNCH
+;   /S        run without any dialog (NSIS built-in switch)
+;   /RELAUNCH start the freshly installed app again when finished
+; The installer closes a running copy, removes the previous files (only when
+; our own uninstall entry points at the target folder) and re-creates the
+; shortcuts and registry entries.
 ; ---------------------------------------------------------------------------
 
 Unicode true
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 
 ; ---------------------------------- Metadata ---------------------------------
 !define APP_NAME      "Jianpu Converter"
 !define APP_SHORTNAME "JianpuConverter"
-!define APP_VERSION   "1.0.0"
+!define APP_VERSION   "1.0.1"
 !define APP_PUBLISHER "Jianpu"
 !define APP_EXE       "JianpuConverter.exe"
 !define APP_REGKEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\JianpuConverter"
 !define APP_EXTKEY    "JianpuConverter.musicxml"
+
+; Version resource so Explorer -> Properties -> Details on the *setup* file
+; shows which release it is (NSIS wants four numbers for VIProductVersion).
+VIProductVersion "${APP_VERSION}.0"
+VIAddVersionKey "ProductName"     "${APP_NAME}"
+VIAddVersionKey "FileDescription" "${APP_NAME} Setup"
+VIAddVersionKey "FileVersion"     "${APP_VERSION}"
+VIAddVersionKey "ProductVersion"  "${APP_VERSION}"
+VIAddVersionKey "LegalCopyright"  "${APP_PUBLISHER}"
 
 ; ---------------------------------- Icons ------------------------------------
 Icon "..\assets\app.ico"
@@ -51,6 +69,25 @@ CRCCheck on
 
 ; ------------------------------- Install section ----------------------------
 Section "Install"
+    ; --- Upgrade helpers ----------------------------------------------------
+    ; Close a running copy so its files are not locked while we replace them.
+    ; The auto-updater makes the app exit first, so this mainly helps when a
+    ; friend double-clicks the new setup while the old version is still open.
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${APP_EXE}"'
+    Pop $0
+    Sleep 600
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${APP_EXE}" /F'
+    Pop $0
+    Sleep 300
+
+    ; Remove the previous version's files so modules that were renamed or
+    ; dropped do not linger.  Only done when OUR uninstall entry points at
+    ; $INSTDIR, so a custom folder picked by the user is never wiped.
+    ReadRegStr $0 HKCU "${APP_REGKEY}" "InstallLocation"
+    ${If} $0 == "$INSTDIR"
+        RMDir /r "$INSTDIR"
+    ${EndIf}
+
     SetOutPath "$INSTDIR"
 
     ; The whole application folder: exe, bundled Python runtime, and the
@@ -84,6 +121,15 @@ Section "Install"
 
     ; Refresh the shell so the new file association takes effect
     System::Call "shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)"
+
+    ; Silent self-update: the app passes /RELAUNCH so the user is back in the
+    ; new version right after the upgrade, with nothing else to click.
+    ${GetParameters} $R0
+    ClearErrors
+    ${GetOptions} $R0 "/RELAUNCH" $R1
+    ${IfNot} ${Errors}
+        Exec '"$INSTDIR\${APP_EXE}"'
+    ${EndIf}
 SectionEnd
 
 ; ------------------------------ Uninstall section ----------------------------

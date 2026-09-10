@@ -15,6 +15,8 @@ patches.py         Fixes for stock jianpu_ly (128th notes, tuplets, …) —
                    canonical tables + the runtime patcher.
 convert.py         The pipeline: convert_musicxml_to_jianpu(xml_path,
                    header_meta=None) → path of the finished PDF.
+updater.py         Self-update: look for a newer GitHub release, download the
+                   installer and run it (used by the GUI footer link).
 gui.py             The tkinter GUI (JianpuConverterApp) and main() entry.
 =================  ==========================================================
 
@@ -24,7 +26,12 @@ Launch it from the repository root with either::
     python -m jianpu_converter       # package entry point
 """
 
+__version__ = "1.0.1"
+
+# Public GitHub repository (owner/name).  Shown as a link in the GUI footer
+# and used by updater.py to find new releases.
+GITHUB_REPO = "BokWeiHong/musicxml-to-jianpu"
+
 from .convert import convert_musicxml_to_jianpu
 
-__version__ = "1.0.0"
-__all__ = ["convert_musicxml_to_jianpu"]
+__all__ = ["convert_musicxml_to_jianpu", "GITHUB_REPO", "__version__"]

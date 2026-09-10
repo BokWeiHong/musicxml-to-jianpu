@@ -14,13 +14,19 @@ import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
+from . import GITHUB_REPO, __version__
+from . import updater
 from .convert import convert_musicxml_to_jianpu
 from .lilypond import find_lilypond
 from .musicxml import extract_musicxml_metadata
 
 # Public GitHub repository for this app: the clickable footer link invites
 # users to grab the source code and play around with it.
-GITHUB_REPO_URL = "https://github.com/BokWeiHong/musicxml-to-jianpu"
+GITHUB_REPO_URL = "https://github.com/" + GITHUB_REPO
+
+# Installed builds quietly ask GitHub for a newer release shortly after
+# startup (see updater.py).  Set to False to make updates fully manual.
+AUTO_CHECK_UPDATES = True
 
 # "Bar numbers" dropdown: the chosen string is mapped to the converter's
 # bar_number_every value by JianpuConverterApp._bar_number_every().
@@ -55,11 +61,20 @@ class JianpuConverterApp:
         self.meta_arranger = tk.StringVar()
         self.meta_instrument = tk.StringVar()
 
+        # Update state (guards against two checks running at once).
+        self._update_check_running = False
+        self._converting = False
+
 
         self._build_ui()
         # Keep the editable score details in sync with the chosen file.
         self.input_file_path.trace_add("write", self._on_path_changed)
         self._prefill_from_args()
+        # Installed copies look for a newer release a moment after startup so
+        # friends never have to check manually; source runs keep quiet (the
+        # header link still works on demand).
+        if AUTO_CHECK_UPDATES and updater.is_frozen():
+            self.root.after(1500, lambda: self.check_for_updates(manual=False))
 
     def _prefill_from_args(self):
         """If the app was launched with a MusicXML file (e.g. opened by
@@ -93,6 +108,22 @@ class JianpuConverterApp:
             bg="#1E293B"
         )
         sub_label.pack()
+
+        # Top-right of the header: version + on-demand update check.  Placed
+        # below the title/subtitle rows so it can never overlap them.
+        self.update_link = tk.Label(
+            header_frame,
+            text="v%s  \u00b7  Check for updates" % __version__,
+            bg="#1E293B", fg="#7DD3FC", cursor="hand2",
+            font=("Segoe UI", 8, "underline"),
+        )
+        self.update_link.place(relx=1.0, x=-14, y=51, anchor="ne")
+        self.update_link.bind("<Button-1>",
+                              lambda _event: self.check_for_updates(manual=True))
+        self.update_link.bind("<Enter>",
+                              lambda _e: self.update_link.config(fg="#BAE6FD"))
+        self.update_link.bind("<Leave>",
+                              lambda _e: self.update_link.config(fg="#7DD3FC"))
 
         # Footer bar: points users at the public GitHub repository so they can
         # download the code and play around with it. Styled like a hyperlink —
@@ -258,6 +289,7 @@ class JianpuConverterApp:
         self.progress.start(10)
         self.status_var.set("Running jianpu-ly and compiling with LilyPond...")
         self.status_label.config(fg="#4F46E5")
+        self._converting = True
 
         # Pass the confirmed/edited score details so the PDF header prints
         # exactly what the user sees (empty values are respected as cleared).
@@ -302,6 +334,7 @@ class JianpuConverterApp:
         self.progress.stop()
         self.btn_convert.config(state="normal")
         self.btn_open_pdf.config(state="normal")
+        self._converting = False
         self.status_var.set(f"Success! Saved: {os.path.basename(pdf_path)}")
         self.status_label.config(fg="#16A34A")
         messagebox.showinfo("Conversion Complete", f"Jianpu PDF successfully created at:\n\n{pdf_path}")
@@ -309,6 +342,7 @@ class JianpuConverterApp:
     def _on_error(self, error_msg):
         self.progress.stop()
         self.btn_convert.config(state="normal")
+        self._converting = False
         self.status_var.set("Conversion failed.")
         self.status_label.config(fg="#DC2626")
         messagebox.showerror("Error", f"Failed to generate Jianpu:\n\n{error_msg}")
@@ -316,6 +350,137 @@ class JianpuConverterApp:
     def _open_pdf(self):
         if self.output_pdf_path and os.path.exists(self.output_pdf_path):
             os.startfile(self.output_pdf_path)
+
+    # ------------------------------------------------------------------
+    # Self-update (see jianpu_converter/updater.py)
+    # ------------------------------------------------------------------
+
+    def check_for_updates(self, manual=False):
+        """Ask GitHub for a newer release; never blocks the interface."""
+        if self._update_check_running:
+            return
+        self._update_check_running = True
+        if manual:
+            self.status_var.set("Checking GitHub for a newer version...")
+            self.status_label.config(fg="#4F46E5")
+        threading.Thread(target=self._check_updates_worker,
+                         args=(manual,), daemon=True).start()
+
+    def _check_updates_worker(self, manual):
+        try:
+            latest = updater.fetch_latest_release()
+        except Exception:
+            latest = None
+        if latest is None:
+            status = "unreachable"
+        elif updater.is_newer(latest.version):
+            status = "update"
+        else:
+            status = "uptodate"
+        self.root.after(0, self._on_update_checked, status, latest, manual)
+
+    def _on_update_checked(self, status, latest, manual):
+        self._update_check_running = False
+        if status == "update":
+            if self._converting:
+                # Never close the app while LilyPond is still working.
+                self.status_var.set(
+                    "Update v%s found - finish this conversion first."
+                    % latest.version)
+                return
+            self._offer_update(latest)
+            return
+        if not manual:
+            return                      # automatic check stays silent
+        if status == "uptodate":
+            self.status_var.set("You already have the newest version (v%s)."
+                                % __version__)
+            self.status_label.config(fg="#16A34A")
+            messagebox.showinfo("Up to date",
+                                "You already have the newest version (v%s)."
+                                % __version__)
+        else:
+            self.status_var.set("Update check failed - no internet?")
+            self.status_label.config(fg="#DC2626")
+            messagebox.showwarning(
+                "Update check failed",
+                "Could not reach GitHub.\n\nCheck your internet connection and "
+                "try again, or visit:\n" + updater.GITHUB_RELEASES_PAGE)
+
+    def _offer_update(self, info):
+        """Tell the user about a newer release and offer to install it."""
+        self.status_var.set("Version v%s is available." % info.version)
+        message = ("A new version of the converter is available.\n\n"
+                   "You have:  v%s\nAvailable:  v%s\n\n"
+                   % (__version__, info.version))
+        if not updater.is_frozen():
+            # Running from source: just open the release page, installing the
+            # packaged app here would be unexpected.
+            if messagebox.askyesno("Update available",
+                                   message + "Open the download page?"):
+                webbrowser.open(info.page_url)
+            return
+        if not messagebox.askyesno(
+                "Update available",
+                message + "Download and install it now?\n"
+                          "The app will close and restart automatically."):
+            self.status_var.set("Update postponed - you can check again anytime.")
+            return
+        self._download_update(info)
+
+    def _download_update(self, info):
+        self.btn_convert.config(state="disabled")
+        self.btn_open_pdf.config(state="disabled")
+        self.progress.start(10)
+        self.status_var.set("Downloading update v%s..." % info.version)
+        self.status_label.config(fg="#4F46E5")
+        threading.Thread(target=self._download_update_worker,
+                         args=(info,), daemon=True).start()
+
+    def _download_update_worker(self, info):
+        try:
+            path = updater.download_installer(
+                info,
+                progress=lambda done, total: self.root.after(
+                    0, self._on_download_progress, done, total))
+        except Exception as err:
+            self.root.after(0, self._on_update_error, str(err))
+            return
+        self.root.after(0, self._install_update, path, info)
+
+    def _on_download_progress(self, done, total):
+        if total:
+            self.status_var.set("Downloading update... %d%%"
+                                % (done * 100 // total))
+        else:
+            self.status_var.set("Downloading update... %.1f MB"
+                                % (done / 1048576.0))
+
+    def _install_update(self, path, info):
+        self.progress.stop()
+        try:
+            updater.launch_installer(path, relaunch=True)
+        except Exception as err:
+            self._on_update_error(str(err))
+            return
+        # The installer waits for us to exit, replaces the files and starts the
+        # new version again (the /RELAUNCH switch).
+        messagebox.showinfo(
+            "Updating",
+            "Version v%s is being installed now.\n\n"
+            "This window will close, and the new version will open by itself."
+            % info.version)
+        self.root.destroy()
+
+    def _on_update_error(self, message):
+        self.progress.stop()
+        self.btn_convert.config(state="normal")
+        self.status_var.set("Update failed.")
+        self.status_label.config(fg="#DC2626")
+        messagebox.showerror(
+            "Update failed",
+            "Could not install the update:\n\n%s\n\nYou can also download it "
+            "manually from:\n%s" % (message, updater.GITHUB_RELEASES_PAGE))
 
 
 def main():

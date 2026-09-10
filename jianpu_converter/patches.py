@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """Fixes for the stock jianpu_ly 1.889 library.
 
 jianpu_ly cannot typeset 128th notes (KeyError('128th')) and silently halves

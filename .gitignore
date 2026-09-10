@@ -15,6 +15,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+how to publish release.txt
 
 # --- PyInstaller build output ----------------------------------------------
 # dist/ and build/ are regenerated with:

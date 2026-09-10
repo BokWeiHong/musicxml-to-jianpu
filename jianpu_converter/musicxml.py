@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """Reading, cleaning and describing the input score.
 
 Everything that happens BEFORE jianpu_ly runs:

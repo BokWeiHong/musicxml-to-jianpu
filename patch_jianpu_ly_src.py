@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """Build-time patcher: create a 128th-ready copy of jianpu_ly.
 
 PyInstaller bundles modules as compiled code, so the runtime patch in

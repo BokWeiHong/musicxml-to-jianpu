@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """LilyPond engine discovery and cache maintenance.
 
 find_lilypond() resolves the engraver in a fixed order (LILYPOND env var,

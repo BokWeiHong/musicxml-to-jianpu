@@ -94,6 +94,16 @@ Section "Install"
     ; portable LilyPond engine (found automatically next to the exe).
     File /r "..\dist\${APP_SHORTNAME}\*.*"
 
+    ; Licence / attribution files must travel with every copy we hand out
+    ; (Apache-2.0 for the patched jianpu_ly, GPL for the bundled LilyPond,
+    ; PSF for the embedded Python).  /nonfatal keeps this working even while
+    ; the application's own LICENSE has not been added yet.
+    File /nonfatal "..\LICENSE"
+    File "..\THIRD-PARTY-NOTICES.md"
+    SetOutPath "$INSTDIR\licenses"
+    File /nonfatal "..\licenses\jianpu_ly-Apache-2.0.txt"
+    SetOutPath "$INSTDIR"
+
     ; Start Menu shortcut
     CreateDirectory "$SMPROGRAMS\${APP_SHORTNAME}"
     CreateShortcut "$SMPROGRAMS\${APP_SHORTNAME}\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"

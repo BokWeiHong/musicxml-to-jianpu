@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """MusicXML -> Jianpu (简谱) PDF Converter  —  desktop launcher.
 
 This file used to contain the whole application; the code now lives in the

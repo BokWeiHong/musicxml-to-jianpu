@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """jianpu_converter — MusicXML → 简谱 (Jianpu) PDF converter package.
 
 The application used to be a single ~1300-line file (app_gui.py).  To keep it

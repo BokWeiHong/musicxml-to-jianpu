@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """tkinter desktop GUI (JianpuConverterApp) and main() entry point.
 
 Lets the user pick a .musicxml/.xml/.mxl file, shows the auto-detected title/

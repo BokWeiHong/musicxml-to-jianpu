@@ -181,6 +181,26 @@ When running from Python source, the app patches `jianpu_ly` dynamically in memo
 
 ---
 
+### Licence
+
+Jianpu Converter is free software, licensed under the **GNU General Public
+License, version 3 or later** (GPL-3.0-or-later) — the full text is in
+[`LICENSE`](LICENSE). Copyright (C) 2026 BokWeiHong.
+
+In plain words: anyone may use, study, share and modify this program (selling it
+is allowed too), but **every version you distribute — modified or not — must
+stay open source under the same licence and keep the copyright notices**.
+Nobody may take this code, close it up and ship it as a proprietary product.
+
+Bundled third-party components keep their own licences — see
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). In short: the app ships a
+**patched** copy of `jianpu_ly` (Apache-2.0, modifications listed) and the
+**unmodified** portable LilyPond 2.26.0 (GPL-3.0+, run as a separate program).
+The installer puts these notices, this licence and the third-party licence
+texts into the program folder on every machine.
+
+---
+
 ## 中文说明
 
 这是一个轻量级的 Windows 桌面工具，可以将 MusicXML 格式的五线谱文件转换为**简谱 PDF**，生成的文件会自动保存在原乐谱同一目录下。
@@ -356,3 +376,13 @@ tools\nsis\nsis-3.09\makensis.exe installer\JianpuConverter.nsi
 * **系统字体要求：** 默认依赖 Windows 系统的黑体（SimHei）和楷体（KaiTi）。如果没有安装，LilyPond 会自动调用默认字体替代。
 * **复杂曲目排版较慢：** 音符密度极高或琶音极多的乐谱，LilyPond 排版用时较长，状态栏显示处理中时耐心等待即可。
 * **仅生成纯简谱：** 软件设计目标为纯数字简谱，不保留上方的五线谱对照。
+
+---
+
+### 授权协议
+
+本软件是自由软件，采用 **GNU 通用公共许可证第 3 版或更高版本（GPL-3.0-or-later）** 授权，完整条款见 [`LICENSE`](LICENSE)。版权所有 (C) 2026 BokWeiHong。
+
+简单来说：任何人都可以自由使用、研究、分享和修改本程序（也允许出售），但**任何对外发布的版本——无论是否修改——都必须继续以相同许可证开源，并保留版权声明**；不允许把本代码闭源后当作专有产品发布。
+
+随程序分发的第三方组件仍遵循各自的许可证，详见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)：其中 `jianpu_ly` 为 Apache-2.0 的**修改版**（修改内容已列明），便携版 LilyPond 2.26.0 为**未修改**的 GPL-3.0+ 独立程序。安装包会把本许可证、第三方声明及许可证文本一并安装到程序目录中。

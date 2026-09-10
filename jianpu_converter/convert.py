@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """The conversion pipeline (MusicXML file -> Jianpu PDF path).
 
 convert_musicxml_to_jianpu() is the orchestrator: prepare a scratch input,

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """Every change applied to the jianpu_ly-generated .ly before compiling.
 
   * header replacement + scoreTitleMarkup   -> the PDF sheet-music header

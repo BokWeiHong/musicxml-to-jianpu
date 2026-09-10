@@ -1,3 +1,6 @@
+# Copyright (C) 2026 BokWeiHong
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This program is free software under the GNU GPL v3 or later; see LICENSE.
 """Self-update: find a newer GitHub release, download it, run its installer.
 
 The installed app asks GitHub for its latest *published* release, compares the

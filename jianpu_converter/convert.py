@@ -15,7 +15,11 @@ import subprocess
 import sys
 import tempfile
 
-from .layout import _inject_cjk_text_font, _inject_dynamic_font_size, _inject_header_layout, _mark_sweep_arrows, _replace_header_blocks
+from .layout import (_expand_empty_bar_rests, _hide_bar_numbers,
+                     _inject_cjk_text_font, _inject_dynamic_font_size,
+                     _inject_header_layout, _inject_note_number_font_size,
+                     _mark_sweep_arrows, _remove_first_line_indent,
+                     _replace_header_blocks)
 from .lilypond import _freshen_lilypond_ccache, find_lilypond
 from .musicxml import _prepare_xml_input, extract_musicxml_metadata
 from .patches import _patch_jianpu_ly
@@ -48,9 +52,12 @@ class _StreamSink:
 
 
 
-def convert_musicxml_to_jianpu(xml_path, header_meta=None):
+def convert_musicxml_to_jianpu(xml_path, header_meta=None, bar_number_every=5):
     """
     Convert a MusicXML file to a Jianpu PDF next to the original file.
+
+    bar_number_every: print a measure number every N bars (5 -> 5, 10, 15...).
+                      None/0 prints no bar numbers at all.
 
     Returns the path of the generated PDF. Raises RuntimeError on failure.
     """
@@ -102,6 +109,14 @@ def convert_musicxml_to_jianpu(xml_path, header_meta=None):
         jianpu_ly.force_staff = False
         jianpu_ly.export = jianpu_ly.unicode_approx = False
 
+        # Bar numbering: jianpu_ly reads this module-level value while it
+        # builds each score (5 = number every 5th bar).  A falsey value means
+        # "no numbers", which is applied after generation by hiding the
+        # BarNumber stencil.
+        hide_bar_numbers = not bar_number_every
+        if not hide_bar_numbers:
+            jianpu_ly.bar_number_every = max(1, int(bar_number_every))
+
         # 1. jianpu_ly: MusicXML -> Jianpu LilyPond source (in-process)
         #    (first normalize exotic note types jianpu_ly cannot print)
         input_path = _prepare_xml_input(xml_path, temp_dir)
@@ -123,15 +138,30 @@ def convert_musicxml_to_jianpu(xml_path, header_meta=None):
                 meta = extract_musicxml_metadata(input_path)
             except Exception:
                 meta = {}  # never fail the whole conversion over a header
-        if any((meta.get(k) or "").strip()
-               for k in ("title", "composer", "arranger", "instrument")):
-            ly_source = _replace_header_blocks(ly_source, meta)
-            ly_source = _inject_header_layout(ly_source, meta)
+        # Always rewrite the \header blocks and the scoreTitleMarkup.  The
+        # header builders simply omit blank fields, and jianpu_ly would
+        # otherwise re-fill them from the MusicXML - so a field that is empty
+        # or could not be found is guaranteed to stay empty in the PDF.
+        ly_source = _replace_header_blocks(ly_source, meta)
+        ly_source = _inject_header_layout(ly_source, meta)
 
 
         # jianpu_ly cannot resize its dynamic marks; inject the smaller
         # DynamicText override into every voice before LilyPond compiles.
         ly_source = _inject_dynamic_font_size(ly_source)
+
+        # Make the jianpu numbers themselves bigger (not the dynamics/text).
+        ly_source = _inject_note_number_font_size(ly_source)
+
+        # Drop the first-line indent so every line's bars share one left edge.
+        ly_source = _remove_first_line_indent(ly_source)
+
+        # Empty measures print one "0" per beat (whole-bar rest -> 0 0 0 0).
+        ly_source = _expand_empty_bar_rests(ly_source)
+
+        # Chosen "no bar numbers" mode hides LilyPond's measure numbers.
+        if hide_bar_numbers:
+            ly_source = _hide_bar_numbers(ly_source)
 
         # Chinese annotations (扫弦/扫 etc.) must render in a CJK font.
         ly_source = _inject_cjk_text_font(ly_source)
@@ -152,6 +182,13 @@ def convert_musicxml_to_jianpu(xml_path, header_meta=None):
         #    immediately with the shipped bytecode.
         _freshen_lilypond_ccache(lilypond_exe)
 
+        # In the windowed (--noconsole) .exe build a console child process
+        # would flash a black window on every conversion; CREATE_NO_WINDOW
+        # keeps LilyPond (and its helper processes) invisible.
+        run_kwargs = {}
+        if os.name == "nt":
+            run_kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+
         proc = subprocess.run(
             [lilypond_exe, "-o", temp_pdf_base, temp_ly],
             stdout=subprocess.PIPE,
@@ -159,6 +196,7 @@ def convert_musicxml_to_jianpu(xml_path, header_meta=None):
             text=True,
             encoding="utf-8",
             errors="replace",
+            **run_kwargs
         )
         if proc.returncode != 0:
             raise RuntimeError(

@@ -24,6 +24,11 @@ Everything runs locally on your PC. No web servers, no uploads, and no internet 
 * **Readable Chinese text:** It applies SimHei for bold titles and KaiTi for Chinese markings so characters display properly.
 * **Patched for tricky scores:** Stock `jianpu_ly` often crashes on real files. We patched it to handle 128th notes, odd tuplets (like 7:8), and multi-part files.
 * **No file lock crashes:** If your PDF viewer already has the file open, it writes `_jianpu_2.pdf` instead of failing.
+* **Even bar lines:** The indent on the first system is removed, so every printed line starts its bars at the same left edge.
+* **Bigger note numbers:** The jianpu digits are rendered noticeably larger — only the numbers (and the `0` rest), never the dynamics, Chinese marks or title.
+* **Rests are zeros:** every rest beat prints as `0` (whole rest → `0 0 0 0`, half rest → `0 0`); the `–` dash is kept only for held notes. A run of silent bars still stays combined into a single multi-measure rest (`|--5--|`) to save space.
+* **Adjustable bar numbers:** pick how often measure numbers are printed (every 1/2/3/5/10 bars) or turn them off with the **Bar numbers** dropdown.
+* **No console flash:** converting from the installed app no longer pops up a command window.
 
 ---
 
@@ -75,7 +80,7 @@ To test conversion directly from PowerShell without the GUI:
 ### How to use the app
 
 1. Click **Browse…** and choose your score file.
-2. Check the **Score details** section. Update the title, composer, or instrument if anything looks off. Empty fields stay blank in the output.
+2. Check the **Score details** section. Update the title, composer, or instrument if anything looks off. Empty fields stay blank in the output. Below them, use the **Bar numbers** dropdown to choose how often measure numbers are printed (or turn them off).
 3. Click **Convert to Jianpu PDF**.
 4. Once finished, click **Open Generated PDF** to review the result.
 
@@ -166,6 +171,11 @@ When running from Python source, the app patches `jianpu_ly` dynamically in memo
 * **中文字体适配：** 默认使用黑体（SimHei）排版大标题、楷体（KaiTi）排版谱面文字标注，避免中文出现方块或乱码。
 * **常见解析报错修复：** 原版 `jianpu_ly` 处理复杂乐谱时容易崩溃，本项目修复了 128 分音符、特殊连音（如 7:8）以及多声部音高判定问题。
 * **防止文件占用冲突：** 如果原本生成的 PDF 正在阅读器中打开，会自动命名为 `_jianpu_2.pdf` 写入，不会提示崩溃。
+* **小节线左右对齐：** 已取消第一行的缩进，让每一行的起始小节都对齐到同一左侧边线。
+* **数字更大更清晰：** 只放大谱面中的简谱数字（以及休止符 `0`），不会影响强弱记号、中文标注和标题大小。
+* **休止符统一为 0：** 每个休止拍都写成 `0`（全休止 `0 0 0 0`，二分休止 `0 0`），`–` 只用于音符的延长。连续多小节的休止仍会合并成一个连休标记（如 `|--5--|`），保持版面紧凑。
+* **小节号可自定义：** 在 **Bar numbers** 下拉框中设置每 1/2/3/5/10 小节显示一次小节号，也可以选择完全不显示。
+* **不再弹出命令行窗口：** 安装版转换时不会再闪出黑色 cmd 窗口。
 
 ---
 
@@ -217,7 +227,7 @@ python -m venv .venv
 ### 使用步骤
 
 1. 点击 **Browse…** 选择曲谱文件。
-2. 查看 **Score details** 面板。如果识别的歌名、作者或乐器有误，可以直接在输入框修改；删空的内容在导出的 PDF 里也会留空。
+2. 查看 **Score details** 面板。如果识别的歌名、作者或乐器有误，可以直接在输入框修改；删空的内容在导出的 PDF 里也会留空。下面的 **Bar numbers** 下拉框可以选择小节号的显示频率（也可以关闭）。
 3. 点击 **Convert to Jianpu PDF** 开始转换。
 4. 转换完成后，点击 **Open Generated PDF** 查看生成的简谱。
 

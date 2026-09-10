@@ -22,6 +22,17 @@ from .musicxml import extract_musicxml_metadata
 # users to grab the source code and play around with it.
 GITHUB_REPO_URL = "https://github.com/BokWeiHong/musicxml-to-jianpu"
 
+# "Bar numbers" dropdown: the chosen string is mapped to the converter's
+# bar_number_every value by JianpuConverterApp._bar_number_every().
+BAR_NUMBER_CHOICES = (
+    "Every 5 bars",
+    "Every 3 bars",
+    "Every 2 bars",
+    "Every bar",
+    "Every 10 bars",
+    "Off (no numbers)",
+)
+
 
 class JianpuConverterApp:
     def __init__(self, root):
@@ -155,6 +166,17 @@ class JianpuConverterApp:
                                                   sticky="ew", pady=2)
             details_frame.columnconfigure(1, weight=1)
 
+        # Bar numbering: how often measure numbers are printed in the PDF.
+        tk.Label(details_frame, text="Bar numbers:", bg="#F1F5F9",
+                 font=("Segoe UI", 9, "bold"), width=12,
+                 anchor="w").grid(row=4, column=0, sticky="w",
+                                  padx=(0, 6), pady=2)
+        self.bar_number_var = tk.StringVar(value=BAR_NUMBER_CHOICES[0])
+        ttk.Combobox(details_frame, textvariable=self.bar_number_var,
+                     state="readonly", values=BAR_NUMBER_CHOICES,
+                     font=("Segoe UI", 10)).grid(row=4, column=1,
+                                                 sticky="ew", pady=2)
+
         # Action Button
 
         self.btn_convert = tk.Button(
@@ -247,14 +269,30 @@ class JianpuConverterApp:
         }
 
         # Run conversion in background to prevent GUI freeze
-        thread = threading.Thread(target=self._run_conversion,
-                                  args=(file_path, header_meta), daemon=True)
+        thread = threading.Thread(
+            target=self._run_conversion,
+            args=(file_path, header_meta, self._bar_number_every()),
+            daemon=True)
 
         thread.start()
 
-    def _run_conversion(self, xml_path, header_meta=None):
+    def _bar_number_every(self):
+        """Map the "Bar numbers" dropdown to the converter's value.
+
+        Returns an int (print a number every N bars) or None for no numbers.
+        """
+        choice = self.bar_number_var.get()
+        if choice.startswith("Off"):
+            return None
+        if choice == "Every bar":
+            return 1
+        return int(choice.split()[1])
+
+    def _run_conversion(self, xml_path, header_meta=None, bar_number_every=5):
         try:
-            out_pdf_target = convert_musicxml_to_jianpu(xml_path, header_meta=header_meta)
+            out_pdf_target = convert_musicxml_to_jianpu(
+                xml_path, header_meta=header_meta,
+                bar_number_every=bar_number_every)
             self.output_pdf_path = out_pdf_target
             self.root.after(0, self._on_success, out_pdf_target)
         except Exception as err:

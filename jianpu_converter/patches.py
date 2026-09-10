@@ -59,6 +59,18 @@ _JIANPU_LY_FUNC_PATCHES = (
     ("self.octavesPosition = None",
      "self.octavesPosition = \"after\" # jianpu-patched default"),
 
+    # Rests are engraved like notes with "-" continuations (0 – – –).  A rest
+    # should read as zeros, so every dash that CONTINUES A REST prints "0"
+    # instead (whole rest -> 0 0 0 0, half rest -> 0 0).  Dashes that continue
+    # a real note keep the dash, because only notes sustain.
+    # (single-line anchors on purpose: patch_jianpu_ly_src.py replaces them in
+    #  the raw file, while the runtime patcher replaces them after dedenting -
+    #  anchors without leading whitespace match in both worlds)
+    (r'''if not_angka: figureDash=u"."''',
+     r'''if not_angka: figureDash=u"0" if self.last_was_rest else u"."'''),
+    (r'''else: figureDash=u"\u2013"''',
+     r'''else: figureDash=u"0" if self.last_was_rest else u"\u2013"'''),
+
     # classic "3[" shorthand.
     ("""            elif re.match(r"[1-9][0-9]*\\[$",word):
                 # tuplet start, e.g. 3[

@@ -7,8 +7,15 @@
     (title centred large/bold SimHei, instrument left, credits right);
   * _inject_dynamic_font_size               -> smaller dynamics;
   * _inject_cjk_text_font                   -> KaiTi for Chinese text marks;
+  * _fix_finger_marks                       -> staccato as a real "x" glyph
+    above the number;
+  * _fix_trill_spanners                     -> one "tr" per trill, plus the
+    wavy line showing where the trill ends;
   * _inject_note_number_font_size           -> bigger jianpu digit glyphs;
-  * _remove_first_line_indent               -> bars start flush on every line;
+  * _fit_instrument_names                   -> room for full-score instrument
+    names, repeated on every system;
+  * _set_first_line_indent                  -> one shared left edge on every
+    line, and no time signature printed twice at a system break;
   * _expand_empty_bar_rests                 -> empty bars print 0 0 0 0;
   * _hide_bar_numbers                       -> optional "no bar numbers" mode;
   * _mark_sweep_arrows                      -> ascend arrow over collapsed runs.
@@ -72,15 +79,32 @@ def _inject_cjk_text_font(ly_source, font_name=_JIANPU_CJK_FONT):
     return script_re.sub(repl, ly_source)
 
 
-def _remove_first_line_indent(ly_source):
-    """Set the score layout indent to 0 (jianpu_ly's built-in 'NoIndent').
+def _set_first_line_indent(ly_source, indent_mm=0.0):
+    """Set the first-system indent and keep every later system aligned.
 
     LilyPond reserves an indent on the first system (the space normally used
     by an instrument name), which pushes the first line's bars to the right
-    of every later line.  Adding ``indent = 0.0`` to each un-commented
-    \\layout block makes the first bar start at the same x as all the bars
-    that follow it.
+    of every later line.  Adding ``indent = 0.0`` (jianpu_ly's built-in
+    'NoIndent') makes the first bar start at the same x as all the bars that
+    follow it; a positive value is used only when instrument names really
+    need the room (see _fit_instrument_names) and then ``short-indent`` is
+    set to the same width so the systems still share one left edge.
+
+    Also stops LilyPond from printing a metre change twice when it lands
+    exactly on a system break: without this, the new time signature is
+    engraved at the end of the previous line *and* at the start of the next
+    one (bar 18 of samples/lace.musicxml).  Mid-line changes are unaffected -
+    ``break-visibility`` only governs line breaks.
     """
+    bs = chr(92)                                  # backslash
+    if indent_mm:
+        width = ("%.1f" % indent_mm) + bs + "mm"
+        extra = "\n short-indent = " + width
+    else:
+        width = "0.0"
+        extra = ""
+    extra += ("\n " + bs + "context { " + bs + "Score " + bs + "override "
+              "TimeSignature.break-visibility = #end-of-line-invisible }")
     result = []
     pos = 0
     for m in re.finditer(r"\\layout\s*\{", ly_source):
@@ -88,10 +112,75 @@ def _remove_first_line_indent(ly_source):
         if ly_source[line_start:m.start()].strip().startswith("%"):
             continue  # never uncomment a % \layout{...} example
         result.append(ly_source[pos:m.end()])
-        result.append(" indent = 0.0")  # like jianpu_ly's NoIndent option
+        result.append(" indent = " + width + extra)
         pos = m.end()
     result.append(ly_source[pos:])
     return "".join(result)
+
+
+# Width of one character of an 11pt instrument name (LilyPond's InstrumentName
+# size) in PDF points.  Measured against LilyPond's own output ("Violin" 30pt,
+# "Contrabass" 48pt, "Violin 1" 39pt): Latin text averages ~5pt per character,
+# a full-width CJK glyph is about twice that.  Close enough to decide how much
+# room a name needs.
+_NAME_LATIN_PT = 5.0
+_NAME_CJK_PT = 11.0
+_NAME_PADDING_PT = 4.0
+# Space an instrument name can use without any indent: LilyPond draws the name
+# to the left of the staff, and the empty page margin (the staff starts at the
+# text area edge, ~15mm in) swallows that much of it.  Only the width beyond
+# this has to be reserved with an indent.
+_NAME_FREE_MARGIN_PT = 40.0
+# ... and never reserve more than this, however long a name is.
+_NAME_MAX_INDENT_MM = 40.0
+
+_INSTRUMENT_NAME_RE = re.compile(
+    r'(?m)^(?P<indent>[ \t]*)instrumentName[ \t]*=[ \t]*"(?P<name>[^"]*)"')
+
+
+def _name_width_pt(name):
+    """Rough printed width of an instrument name at LilyPond's 11pt."""
+    return sum(_NAME_CJK_PT if ord(ch) > 0x2E7F else _NAME_LATIN_PT
+               for ch in name)
+
+
+def _fit_instrument_names(ly_source):
+    """Make room for instrument names and show them on every system.
+
+    LilyPond takes the space it leaves for ``instrumentName`` from the
+    ``indent`` setting.  Single-part scores here use ``indent = 0`` (bars
+    start flush left, the instrument already sits in the sheet header), which
+    is fine for a short name: it just spills into the empty page margin.
+
+    A full score is a different story - every one of its staves is labelled,
+    the longest name can be much wider than that margin (so it was cut off at
+    the page edge), and because ``shortInstrumentName`` is never set,
+    LilyPond prints the names on the *first* system only, leaving the rest of
+    a full score with no instrument at all.
+
+    So: a full score repeats every name on every system, and a name that is too
+    wide for the margin (in a full score, or on a single-part sheet) gets an
+    indent for the part the margin cannot absorb.  ``short-indent`` receives
+    the same width, so all systems keep one shared left edge.  A single-part
+    score with a short name - the common case here - is left exactly as it was.
+    """
+    matches = list(_INSTRUMENT_NAME_RE.finditer(ly_source))
+    if not matches:
+        return _set_first_line_indent(ly_source, 0.0)
+    widest = max(_name_width_pt(m.group("name")) for m in matches)
+    widest += _NAME_PADDING_PT
+    full_score = len(matches) > 1
+    if not full_score and widest <= _NAME_FREE_MARGIN_PT:
+        return _set_first_line_indent(ly_source, 0.0)
+
+    indent_mm = min(max(0.0, widest - _NAME_FREE_MARGIN_PT) / 2.83465,
+                    _NAME_MAX_INDENT_MM)
+    if full_score:
+        ly_source = _INSTRUMENT_NAME_RE.sub(
+            lambda m: '%s\n%sshortInstrumentName = "%s"'
+                      % (m.group(0), m.group("indent"), m.group("name")),
+            ly_source)
+    return _set_first_line_indent(ly_source, indent_mm)
 
 
 def _expand_empty_bar_rests(ly_source):
@@ -401,3 +490,183 @@ def _mark_sweep_arrows(ly_source, font_name=_JIANPU_CJK_FONT):
             start = i
         tail = tail[:start] + tail[end:]
     return head + tail
+
+
+# ---------------------------------------------------------------------------
+# Articulations jianpu_ly asks LilyPond to draw with a glyph that is missing
+# ---------------------------------------------------------------------------
+
+_BS = chr(92)                                  # backslash
+
+
+def _map_jianpu_region(ly_source, transform):
+    """Apply transform() to the jianpu staff region only.
+
+    jianpu_ly marks its own staff with ``% === BEGIN/END JIANPU STAFF ===``
+    comments; everything between the first BEGIN and the last END is jianpu
+    output.  The western/MIDI copy of the score that follows it is left alone.
+    """
+    begin = ly_source.find("% === BEGIN JIANPU STAFF ===")
+    end = ly_source.rfind("% === END JIANPU STAFF ===")
+    if begin < 0 or end <= begin:
+        return ly_source
+    return ly_source[:begin] + transform(ly_source[begin:end]) + ly_source[end:]
+
+
+# jianpu_ly renders MusicXML <staccato/> (and the annotation words "down",
+# "bend", "tilde") as a *fingering* whose text is a symbol character.  A
+# fingering's markup is drawn in LilyPond's music font, which has no such
+# character: LilyPond dropped the mark and emitted one "no glyph for character
+# '▼'" warning per note (1566 of them for samples/lace.musicxml), so staccato
+# notes came out with no staccato at all.  The ▼ it used is also far too easy
+# to mistake for an octave dot.  Rewrite these markups as an upward text mark:
+# a bold sans "x" above the number for staccato (the convention numbered
+# notation uses for it), and any other symbol in a text font that has it.
+_FINGER_GLYPH_RE = re.compile(
+    r"\\finger\s+\\markup\s*\{\s*\\fontsize\s+#-?[0-9]+\s*\"(?P<char>[^\"]*)\"\s*\}")
+_STACCATO_GLYPH = "\u25bc"                     # ▼ - jianpu_ly's staccato mark
+_STACCATO_MARKUP = ("^ " + _BS + 'markup { ' + _BS
+                    + "override #'(font-name . \"Nimbus Sans\") " + _BS
+                    + 'bold "x" }')
+
+
+def _fix_finger_marks(ly_source, font_name=_JIANPU_CJK_FONT):
+    """Draw staccato (and other symbol fingerings) with a real glyph."""
+    def repl(match):
+        text = match.group("char")
+        if text == _STACCATO_GLYPH:
+            return _STACCATO_MARKUP
+        if all(ord(ch) < 128 for ch in text):
+            return match.group(0)      # plain ASCII fingering: renders fine
+        return ("^ " + _BS + 'markup { ' + _BS
+                + "override #'(font-name . \"%s\") " % font_name
+                + _BS + 'bold "%s" }' % text)
+
+    return _map_jianpu_region(
+        ly_source, lambda part: _FINGER_GLYPH_RE.sub(repl, part))
+
+
+# jianpu_ly emits a <trill-mark/> + <wavy-line start/stop> as a \trill *script*
+# plus a TrillSpanner, and it defers both to the event *after* the note they
+# belong to.  That draws two "tr" glyphs, and whenever the start and the stop
+# land on the same event - the normal case when MusicXML puts trill-mark,
+# wavy-line start and wavy-line stop on one held note (bar 63 of
+# samples/lace.musicxml) - the spanner has no length, LilyPond never closes it
+# and its wavy line runs on to the end of the system.
+#
+# So the span is rebuilt around the trilled note itself: the "tr" moves to the
+# note where the trill starts and a single wavy line covers that note, ending
+# where the trill stops.  A jianpu note that is held over several beats is a
+# digit plus "–" dashes, which is why the span has to end on the event *after*
+# the note's last dash (LilyPond ends a trill span in front of the event its
+# \stopTrillSpan sits on):
+#
+#     \note-mod "7" b''4                              <- "tr" + line start
+#     \note-mod "–" b''4
+#     \note-mod "–" b''4        \stopTrillSpan        <- line ends with the note
+#     \note-mod "1" c'''4.
+#
+# Insertions only ever happen where jianpu_ly puts its own annotations - in the
+# gap in front of an event - so chords and beams stay valid.
+_EVENT_RE = re.compile(r'\\note-mod\s+"([^"]*)"')
+_DASH_MARKUP = "\u2013"                 # – : the sustain dash, not a number
+_START_TRILL_RE = re.compile(r"\\startTrillSpan")
+_STOP_TRILL_RE = re.compile(r"\\stopTrillSpan")
+_TRILL_SCRIPT_RE = re.compile(r"\\trill(?![A-Za-z])")
+
+
+def _rewrite_trills(part):
+    """One "tr" on the trill's first note, wavy line over the trilled note(s)."""
+    events = [(m.start(), "dash" if m.group(1) == _DASH_MARKUP else "note")
+              for m in _EVENT_RE.finditer(part)]
+    if not events:
+        return part                      # no jianpu events: leave it alone
+    places = [pos for pos, _kind in events]
+
+    def event_before(pos):
+        """Index of the last event that starts before pos (None if none)."""
+        found = None
+        for index, start in enumerate(places):
+            if start < pos:
+                found = index
+            else:
+                break
+        return found
+
+    def note_start(index):
+        while index > 0 and events[index][1] == "dash":
+            index -= 1
+        return index
+
+    def note_end(index):
+        while index + 1 < len(events) and events[index + 1][1] == "dash":
+            index += 1
+        return index
+
+    removals = []                        # (start, end) ranges to drop
+    insertions = []                      # (position, text) to insert
+    starts = list(_START_TRILL_RE.finditer(part))
+    stops = list(_STOP_TRILL_RE.finditer(part))
+    scripts = list(_TRILL_SCRIPT_RE.finditer(part))
+    used_stops = set()
+
+    for start_match in starts:
+        anchor = event_before(start_match.start())
+        if anchor is None:
+            continue                     # token before any note: leave as is
+        stop_match = next((s for s in stops
+                           if s.start() > start_match.start()
+                           and s.start() not in used_stops), None)
+        for script in scripts:           # the redundant \trill of this trill
+            same_gap = (script.start() < start_match.start()
+                        and places[anchor] < script.start()
+                        and anchor == event_before(script.start()))
+            if same_gap:
+                removals.append((script.start(), script.end()))
+                break
+        removals.append((start_match.start(), start_match.end()))
+
+        stop_anchor = None
+        if stop_match is not None:
+            used_stops.add(stop_match.start())
+            removals.append((stop_match.start(), stop_match.end()))
+            stop_anchor = event_before(stop_match.start())
+
+        after = None
+        if stop_anchor is not None:
+            after = note_end(stop_anchor) + 1
+        if after is None or after >= len(events):
+            # The source gives no end for this trill (or it runs to the end of
+            # the score): a lone "tr" is better than a line that never stops.
+            insertions.append((places[note_start(anchor)], _BS + "trill "))
+            continue
+        insertions.append((places[note_start(anchor)], _BS + "startTrillSpan "))
+        insertions.append((places[after], _BS + "stopTrillSpan "))
+
+    if not removals and not insertions:
+        return part
+
+    pruned = []
+    pos = 0
+    for start, end in sorted(removals):
+        if start < pos:                  # overlapping ranges: drop the rest
+            continue
+        pruned.append(part[pos:start])
+        pos = end
+    pruned.append(part[pos:])
+    result = "".join(pruned)
+
+    def shifted(position):
+        return position - sum(end - start for start, end in removals
+                              if end <= position)
+
+    for position, text in sorted(insertions, reverse=True):
+        point = shifted(position)
+        result = result[:point] + text + result[point:]
+    return result
+
+
+def _fix_trill_spanners(ly_source):
+    """Print one "tr" per trill, with the wavy line showing where it ends."""
+    return _map_jianpu_region(ly_source, _rewrite_trills)
+

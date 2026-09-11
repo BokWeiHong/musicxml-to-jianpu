@@ -61,17 +61,36 @@ def next_version(current, kind):
                      % kind)
 
 
+def _read_text(path):
+    """Return (text, had_utf8_bom) for a script we are about to rewrite.
+
+    installer/JianpuConverter.nsi must keep its UTF-8 BOM: NSIS only reads a
+    script as UTF-8 when the BOM is there, and without it the finish page's
+    Chinese text comes out as mojibake (ç®€è°± instead of 简谱).
+    """
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    return raw.decode("utf-8-sig"), raw.startswith(b"\xef\xbb\xbf")
+
+
+def _write_text(path, text, bom):
+    """Write text back byte-for-byte, restoring the UTF-8 BOM if it had one."""
+    data = text.encode("utf-8")
+    if bom:
+        data = b"\xef\xbb\xbf" + data
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
 def _sub_file(path, pattern, new_version, label):
     if not os.path.isfile(path):
         print("  skip   %-32s (missing)" % label)
         return 0
-    with open(path, encoding="utf-8") as handle:
-        text = handle.read()
+    text, bom = _read_text(path)
     new_text, count = re.subn(pattern, lambda m: m.group(1) + new_version
                               + m.group(2), text)
     if count:
-        with open(path, "w", encoding="utf-8", newline="") as handle:
-            handle.write(new_text)
+        _write_text(path, new_text, bom)
     print("  %-6s %-32s %d change(s)" % ("update" if count else "same",
                                          label, count))
     return count

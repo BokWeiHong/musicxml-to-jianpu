@@ -89,7 +89,7 @@ To test conversion directly from PowerShell without the GUI:
 
 ### Sharing with others
 
-To share this with friends on Windows, give them `release\JianpuConverter-Setup-1.0.1.exe`.
+To share this with friends on Windows, give them `release\JianpuConverter-Setup-1.0.2.exe`.
 
 * Installs per-user without requiring admin privileges.
 * Creates desktop/start shortcuts and associates `.musicxml` files.
@@ -116,7 +116,7 @@ To share this with friends on Windows, give them `release\JianpuConverter-Setup-
    ```
    …or by hand: GitHub → **Releases → Draft a new release** → tag `v1.0.1`
    (create the tag on publish, target `main`) → attach
-   `release\JianpuConverter-Setup-1.0.1.exe` → **Publish release**.
+   `release\JianpuConverter-Setup-1.0.2.exe` → **Publish release**.
 
 That's it. Every installed app checks `api.github.com/.../releases/latest` about a
 second after it starts, and its owner just clicks **Update now**. The tag **must**
@@ -169,6 +169,13 @@ Stock `jianpu_ly` breaks on several real-world scores (such as 128th notes and u
 When running from Python source, the app patches `jianpu_ly` dynamically in memory. Because PyInstaller bundles compiled bytecode, runtime source patching cannot happen in the frozen `.exe`.
 
 `patch_jianpu_ly_src.py` solves this. If you edit replacements in `jianpu_converter/patches.py`, run `patch_jianpu_ly_src.py` before rebuilding your installer so the changes carry over.
+
+Full scores also need a few fixes that jianpu_ly cannot express; those live in `jianpu_converter/layout.py`:
+
+* **Staccato** is drawn as a bold "x" **above** the number. jianpu_ly asked for a "▼" from the music font, which has no such glyph, so every staccato mark was dropped (a five-part score produced 1566 "no glyph" warnings) — and the symbol was easy to confuse with an octave dot.
+* **Trills** print one "tr" on the note where the trill starts, followed by the wavy line that shows how long the trill lasts. jianpu_ly emitted both a `\trill` script *and* a trill spanner (two "tr" marks), and when the span's start and stop fell on the same event the line was never closed, so it ran on through every following bar.
+* **Time signatures** are printed once. A metre change that fell exactly on a system break used to be engraved at the end of the previous line *and* at the start of the next one (bar 18 of `samples/lace.musicxml`).
+* **Instrument names** on a full score get the width they need and are repeated on every system, so no name is pushed off the page edge and later lines are not left unlabelled.
 
 ---
 
@@ -288,7 +295,7 @@ python -m venv .venv
 
 ### 分享安装包
 
-如果要把工具发给其他人使用，直接发送 `release\JianpuConverter-Setup-1.0.1.exe` 即可：
+如果要把工具发给其他人使用，直接发送 `release\JianpuConverter-Setup-1.0.2.exe` 即可：
 
 * 安装在当前用户目录下，不需要管理员权限。
 * 自动创建桌面与开始菜单快捷方式，并关联 `.musicxml` 文件（支持双击直接打开）。
@@ -315,7 +322,7 @@ python -m venv .venv
    ```
    也可以手动操作：GitHub → **Releases → Draft a new release** → 标签填 `v1.0.1`
    （发布时创建标签，目标选 `main`）→ 上传
-   `release\JianpuConverter-Setup-1.0.1.exe` → **Publish release**。
+   `release\JianpuConverter-Setup-1.0.2.exe` → **Publish release**。
 
 完成后，所有已安装的软件在启动约 1 秒后会查询
 `api.github.com/.../releases/latest`，朋友只要点一下 **Update now** 就升级好了。
@@ -367,6 +374,13 @@ tools\nsis\nsis-3.09\makensis.exe installer\JianpuConverter.nsi
 直接通过 Python 源码运行时，程序会自动在内存中热修复这些方法。但 PyInstaller 打包后全部为编译字节码，无法直接修改源码。
 
 因此提供了 `patch_jianpu_ly_src.py`。如果你后续在 `jianpu_converter/patches.py` 中增加了新的修补规则，打包前必须先运行该脚本重新生成补丁文件，否则打出来的 `.exe` 依然会走旧版逻辑。
+
+多声部总谱还额外做了以下修正（都在 `jianpu_converter/layout.py` 中）：
+
+* **断音记号**改用粗体 “x” 标在数字**上方**。原版 jianpu_ly 调用的是音乐字体中的 “▼”，该字体并没有这个字形，结果所有断音记号都被丢弃（五声部总谱会刷出 1566 条 “no glyph” 警告），而且这个符号本身也很容易和高八度点混淆。
+* **颤音**只在颤音起始的那个音上印一个 “tr”，后面接一条波浪线，用来显示颤音持续到哪里。原版同时输出了 `\trill` 记号与颤音延长线（spanner），因此会出现两个 “tr”；当延长线的起点和终点落在同一个音符事件上时，线永远收不回来，于是一路拖到后面所有小节。
+* **拍号**只显示一次。过去正好落在换行处的拍号变化，会同时画在上一行末尾和下一行开头（`samples/lace.musicxml` 第 18 小节）。
+* **总谱乐器名**会预留足够宽度，并在每一行都重复显示，既不会被挤出纸边，也不会出现后面各行没有乐器名的情况。
 
 ---
 

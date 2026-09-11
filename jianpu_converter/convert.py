@@ -18,11 +18,11 @@ import subprocess
 import sys
 import tempfile
 
-from .layout import (_expand_empty_bar_rests, _hide_bar_numbers,
+from .layout import (_expand_empty_bar_rests, _fit_instrument_names,
+                     _fix_finger_marks, _fix_trill_spanners, _hide_bar_numbers,
                      _inject_cjk_text_font, _inject_dynamic_font_size,
                      _inject_header_layout, _inject_note_number_font_size,
-                     _mark_sweep_arrows, _remove_first_line_indent,
-                     _replace_header_blocks)
+                     _mark_sweep_arrows, _replace_header_blocks)
 from .lilypond import _freshen_lilypond_ccache, find_lilypond
 from .musicxml import _prepare_xml_input, extract_musicxml_metadata
 from .patches import _patch_jianpu_ly
@@ -153,11 +153,20 @@ def convert_musicxml_to_jianpu(xml_path, header_meta=None, bar_number_every=5):
         # DynamicText override into every voice before LilyPond compiles.
         ly_source = _inject_dynamic_font_size(ly_source)
 
+        # Staccato notes carried a symbol the music font has no glyph for
+        # (LilyPond dropped the mark), and trills were drawn twice with a
+        # never-closed wavy line trailing into the following bars.
+        ly_source = _fix_finger_marks(ly_source)
+        ly_source = _fix_trill_spanners(ly_source)
+
         # Make the jianpu numbers themselves bigger (not the dynamics/text).
         ly_source = _inject_note_number_font_size(ly_source)
 
-        # Drop the first-line indent so every line's bars share one left edge.
-        ly_source = _remove_first_line_indent(ly_source)
+        # Instrument names: reserve the room a full score's names need, show
+        # them on every system, and give every line one shared left edge.  The
+        # same step also removes the duplicate time signature LilyPond prints
+        # at both ends of a system break.
+        ly_source = _fit_instrument_names(ly_source)
 
         # Empty measures print one "0" per beat (whole-bar rest -> 0 0 0 0).
         ly_source = _expand_empty_bar_rests(ly_source)

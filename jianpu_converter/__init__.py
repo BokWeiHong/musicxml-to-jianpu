@@ -29,7 +29,7 @@ Launch it from the repository root with either::
     python -m jianpu_converter       # package entry point
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 # Public GitHub repository (owner/name).  Shown as a link in the GUI footer
 # and used by updater.py to find new releases.

@@ -1,8 +1,14 @@
-; ---------------------------------------------------------------------------
+﻿; ---------------------------------------------------------------------------
 ; Jianpu Converter -- NSIS installer script
 ; Build:  makensis.exe JianpuConverter.nsi
 ; Produces: ..\release\JianpuConverter-Setup-<version>.exe
 ; Per-user install (no administrator rights required).
+;
+; IMPORTANT: keep this file saved as **UTF-8 with BOM**.
+;   NSIS only parses a script as UTF-8 when it sees the BOM; without it the
+;   Chinese text below (the finish-page link) is read as ANSI and every copy
+;   of the installer shows mojibake ("ç®€è°±" instead of "简谱").
+;   bump_version.py preserves the BOM when it rewrites APP_VERSION.
 ;
 ; Silent self-update contract (used by jianpu_converter/updater.py):
 ;     JianpuConverter-Setup-1.0.1.exe /S /RELAUNCH
@@ -22,7 +28,7 @@ Unicode true
 ; ---------------------------------- Metadata ---------------------------------
 !define APP_NAME      "Jianpu Converter"
 !define APP_SHORTNAME "JianpuConverter"
-!define APP_VERSION   "1.0.1"
+!define APP_VERSION   "1.0.2"
 !define APP_PUBLISHER "Jianpu"
 !define APP_EXE       "JianpuConverter.exe"
 !define APP_REGKEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\JianpuConverter"
